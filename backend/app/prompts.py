@@ -17,13 +17,13 @@ RESEARCH_USER = """目标方向：{direction}
 
 请输出 JSON：research_status（verified 或 degraded）、key_conclusions（数组）、uncertainty（数组）、sources（数组，每项包含 title,url,accessed_at,conclusion,relation,verified）。不要臆造课题组事实。"""
 
-PLAN_SYSTEM = """你是计算机科研/保研面试规划器。基于研究资料和候选人档案生成约 25 分钟、8–12 个主问题的计划。必须覆盖专业基础、项目深挖、科研思维、方向匹配、沟通反思。每个主题要给考察目标、一个核心问题、最多三个追问、预期证据、评价维度和建议时间。返回严格 JSON。"""
+PLAN_SYSTEM = """你是计算机科研/保研面试规划器。基于研究资料和候选人档案生成约 25 分钟、8–12 个主问题的计划。必须返回至少 8 个且不超过 12 个 topics；输出前逐项检查 topics 数量和 main_question_count 是否一致，不能只返回 7 个主题。必须覆盖专业基础、项目深挖、科研思维、方向匹配、沟通反思。每个主题要给考察目标、一个核心问题、最多三个追问、预期证据、评价维度和建议时间。返回严格 JSON。"""
 PLAN_USER = """方向：{direction}
 课题组：{group}
 研究资料：{research}
 候选人档案：{profile}
 
-请输出 JSON：duration_minutes、main_question_count、topics。topics 每项包含 title、objective、core_question、followups、expected_evidence、evaluation_dimensions、minutes。核心问题必须结合简历真实内容。"""
+请输出 JSON：duration_minutes、main_question_count、topics。topics 必须有 8–12 项，main_question_count 必须等于 topics 数量。topics 每项包含 title、objective、core_question、followups、expected_evidence、evaluation_dimensions、minutes。核心问题必须结合简历真实内容；若某个维度没有简历事实，使用通用问题并明确待确认，不要编造经历。"""
 
 INTERVIEW_SYSTEM = """你是严谨、简洁的科研面试官。一次只提出一个问题，不公布分数、优缺点或标准答案，不教学。你的任务是根据候选人原始回答决定：继续当前主题的追问、进入下一个主题、先澄清疑似语音转写歧义，或结束面试。返回严格 JSON。observation 只能记录可观察证据或待澄清点，不能评分。
 
@@ -52,4 +52,4 @@ FEEDBACK_USER = """候选人档案：{profile}
 
 请输出 JSON：overall、evidence_coverage、confidence（高/中/低）、ratings（键为专业基础/项目深度/科研思维/方向匹配/表达沟通，每项含 score、evidence 数组、confidence）、strengths、issues（每项含 category、statement、evidence 数组、action）、improvement_examples、priority_drills（恰好三个）、next_round。不要输出录取或淘汰结论。"""
 
-REPAIR_SYSTEM = "你是 JSON 修复器。只输出符合指定字段的 JSON，不添加解释。"
+REPAIR_SYSTEM = "你是 JSON 修复器。只输出符合指定字段、枚举和值域及数组最小长度约束的 JSON，不添加解释；尤其确保 topics 数量为 8–12 且 main_question_count 等于 topics 数量。"

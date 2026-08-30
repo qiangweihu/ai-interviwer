@@ -1,11 +1,30 @@
 import unittest
 from pathlib import Path
 
+from backend.app.schemas import PlanPayload
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class ServerScaffoldContractTests(unittest.TestCase):
+    def test_short_model_plan_is_completed_to_minimum_topic_count(self):
+        topics = [
+            {
+                "title": f"主题 {index}",
+                "objective": "检查一个面试维度",
+                "core_question": "请说明你的判断和依据。",
+                "followups": [],
+                "expected_evidence": ["事实"],
+                "evaluation_dimensions": ["科研思维"],
+                "minutes": 2,
+            }
+            for index in range(7)
+        ]
+        plan = PlanPayload.model_validate({"duration_minutes": 25, "main_question_count": 7, "topics": topics})
+        self.assertEqual(len(plan.topics), 8)
+        self.assertEqual(plan.main_question_count, 8)
+
     def test_server_files_and_api_contract_are_present(self):
         for path in (
             "backend/app/main.py",

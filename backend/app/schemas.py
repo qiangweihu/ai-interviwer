@@ -57,6 +57,79 @@ class PlanPayload(BaseModel):
     main_question_count: int = Field(default=10, ge=8, le=12)
     topics: list[PlanTopic] = Field(min_length=8, max_length=12)
 
+    @model_validator(mode="before")
+    @classmethod
+    def pad_short_model_output(cls, value: Any):
+        """Keep a nearly valid model response usable without inventing CV facts.
+
+        MiMo occasionally returns seven topics even though the contract asks
+        for 8–12. Add only generic coverage topics before normal validation;
+        these contain no candidate-specific claims and let the interview
+        continue while preserving the minimum plan contract.
+        """
+        if not isinstance(value, dict):
+            return value
+        topics = value.get("topics")
+        if not isinstance(topics, list) or len(topics) >= 8:
+            return value
+
+        fallback_topics = [
+            {
+                "title": "专业基础补充",
+                "objective": "补充核验方向相关的核心概念和边界。",
+                "core_question": "请解释目标方向中一个尚未展开的核心概念，并说明它的适用边界。",
+                "followups": ["这个概念依赖哪些关键假设？"],
+                "expected_evidence": ["定义、机制、边界"],
+                "evaluation_dimensions": ["专业基础"],
+                "minutes": 2,
+            },
+            {
+                "title": "实验设计补充",
+                "objective": "补充核验实验设计、指标和对照。",
+                "core_question": "如果要验证一个改动确实有效，你会如何设计最小对照实验？",
+                "followups": ["结果不符合预期时先检查什么？"],
+                "expected_evidence": ["假设、指标、对照"],
+                "evaluation_dimensions": ["科研思维"],
+                "minutes": 2,
+            },
+            {
+                "title": "方向匹配补充",
+                "objective": "补充核验研究动机与方向关联。",
+                "core_question": "你希望在这个研究方向中优先解决哪类问题，为什么？",
+                "followups": ["你会如何开始验证这个想法？"],
+                "expected_evidence": ["具体动机、问题关联"],
+                "evaluation_dimensions": ["方向匹配"],
+                "minutes": 2,
+            },
+            {
+                "title": "沟通反思补充",
+                "objective": "补充核验复盘和清晰表达能力。",
+                "core_question": "请回顾一次没有达到预期的尝试，并说明你会如何改进。",
+                "followups": ["你如何判断改进是否有效？"],
+                "expected_evidence": ["事实、反思、行动"],
+                "evaluation_dimensions": ["表达沟通"],
+                "minutes": 2,
+            },
+        ]
+        padded = list(topics)
+        existing_titles = {
+            item.get("title") for item in padded if isinstance(item, dict) and item.get("title")
+        }
+        for fallback in fallback_topics:
+            if len(padded) >= 8:
+                break
+            topic = dict(fallback)
+            title = topic["title"]
+            if title in existing_titles:
+                title = f"{title}（补充）"
+            topic["title"] = title
+            padded.append(topic)
+            existing_titles.add(title)
+        normalized = dict(value)
+        normalized["topics"] = padded
+        normalized["main_question_count"] = len(padded)
+        return normalized
+
     @model_validator(mode="after")
     def align_question_count(self):
         self.main_question_count = len(self.topics)
