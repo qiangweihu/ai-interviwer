@@ -35,12 +35,14 @@
 ## 路由规则
 
 1. 若 `.interview/profile/research-context.md` 或 `candidate-profile.md` 缺失、不完整或用户明确要更新资料，调用 `$interview-onboarding`。
-2. 若档案完整但当前 session 缺少有效的 `research-brief.md` 或 `interview-plan.md`，调用 `$interview-planner`。
+2. 若档案完整但当前 session 缺少有效的 `research-brief.md` 或 `interview-plan.md`，在后台调用 `$interview-planner`。规划是面试开始前的内部准备动作，不要求用户单独进入或确认规划阶段，也不默认展示完整题单。
 3. 若计划有效且状态为 `ready_for_interview` 或 `interview_in_progress`，调用 `$mock-interviewer`。
 4. 若状态为 `ready_for_feedback` 且存在完整 `transcript.md`，调用 `$interview-feedback`。
 5. 完成反馈后保持 `complete`，用户说“再练一轮/开始下一次”时创建新 session；不要删除历史记录。
 
 用户可以显式使用 `$interview-onboarding`、`$interview-planner`、`$mock-interviewer` 或 `$interview-feedback`。显式调用也必须遵守前置状态检查，不能跳过缺失的全局档案或过期计划。
+
+规划完成后只需向用户确认“面试已准备好”，并进入模拟面试；只有用户明确要求时才展示规划摘要，不能在首屏泄露完整问题。
 
 ## 统一隐私与证据规则
 

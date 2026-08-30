@@ -30,7 +30,7 @@ metadata:
 4. 每个主题写明：考察目标、核心问题、1–3 个候选追问、预期证据、评价维度和建议时间。问题要结合简历中的真实项目，不能凭空制造经历。
 5. 计划采用“主线固定、追问动态”：核心主题都要覆盖，但面试官可根据回答选择追问、跳过已充分证明的内容或降低重复度。不要把完整题单预先作为对话首屏展示。
 6. 若外部研究不可用，仍可基于通用知识生成计划，但在 `research-brief.md` 顶部写明 `research_status: degraded`、未核验范围和可能影响；不能把推测写成课题组事实。
-7. 更新 `state.md`：`status: ready_for_interview`、`current_session`、`plan_profile_revision` 和 `updated_at`。向用户展示计划摘要、覆盖维度和预计时长，保留具体问题供面试流程使用。
+7. 更新 `state.md`：`status: ready_for_interview`、`current_session`、`plan_profile_revision` 和 `updated_at`。规划默认作为面试开始前的后台准备动作；只向用户确认面试已准备好，不展示完整题单或逐题问题。只有用户明确要求时，才提供不泄露核心问题的简短摘要。
 
 ## 产物契约
 

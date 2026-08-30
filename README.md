@@ -1,9 +1,9 @@
 # AI 模拟面试官
 
-面向计算机专业保研/课题组科研面试的 Codex 原生训练工作流。它把一次练习组织成：
+面向计算机专业保研/课题组科研面试的 Codex 原生训练工作流。它把一次练习组织成（规划在后台自动完成）：
 
 ```text
-资料准备 → 定向规划 → 自适应模拟面试 → 证据化反馈 → 再次练习
+资料准备 → 后台定向准备 → 自适应模拟面试 → 证据化反馈 → 再次练习
 ```
 
 ## 快速开始
@@ -11,16 +11,16 @@
 在 Codex 中打开本仓库，然后：
 
 1. 输入目标课题组或科研方向，并提供一份脱敏的 PDF、DOCX、Markdown 或 TXT 简历；首次使用会自动进入 `$interview-onboarding`。
-2. 说“规划一次科研面试”，由 `$interview-planner` 收集方向资料并生成约 25 分钟、8–12 个主问题的计划。
+2. 资料保存后会自动调用 `$interview-planner` 收集方向资料并准备约 25 分钟、8–12 个主问题的内部计划；用户无需单独进入规划阶段，也不会默认看到完整题单。
 3. 说“开始面试”，由 `$mock-interviewer` 一次提问一个问题。推荐使用 Codex 的语音转文字输入；随时输入“结束面试”即可提前结束。
 4. 结束后由 `$interview-feedback` 输出带回答证据的优势、问题、评分和下一轮训练动作。
 5. 说“再练一轮”会创建新的 session，保留历史记录并复用全局档案。
 
-也可以显式调用 `$interview-onboarding`、`$interview-planner`、`$mock-interviewer` 或 `$interview-feedback`。阶段状态由根目录 `AGENTS.md` 统一路由，不能跳过缺失资料或过期计划。
+也可以显式调用 `$interview-onboarding`、`$interview-planner`、`$mock-interviewer` 或 `$interview-feedback` 进行调试或重试。阶段状态由根目录 `AGENTS.md` 统一路由，不能跳过缺失资料或过期计划。
 
 ## 服务器版（FastAPI + React）
 
-仓库同时包含一个可部署的匿名 Web 版本。它把四个 skill 的规则固化为后端状态机和 MiMo 提示词模块，前端由 FastAPI 同源提供。服务器版不依赖 Codex 窗口，也不需要用户安装 Codex。
+仓库同时包含一个可部署的匿名 Web 版本。它把四个 skill 的规则固化为后端状态机和 MiMo 提示词模块，前端由 FastAPI 同源提供。服务器版不依赖 Codex 窗口，也不需要用户安装 Codex。上传资料后规划自动在后台完成，网页只显示“面试已准备好”，不单独展示规划页面或完整题单。
 
 本地开发（需要 Python 3.12、Node 22）：
 
