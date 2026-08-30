@@ -12,9 +12,13 @@
 
 1. 输入目标课题组或科研方向，并提供一份脱敏的 PDF、DOCX、Markdown 或 TXT 简历；首次使用会自动进入 `$interview-onboarding`。
 2. 资料保存后会自动调用 `$interview-planner`，基于候选人资料和通用知识准备约 25 分钟、8–12 个主问题的内部计划；当前版本不联网检索，用户无需单独进入规划阶段，也不会默认看到完整题单。
-3. 说“开始面试”，由 `$mock-interviewer` 一次提问一个问题。推荐使用 Codex 的语音转文字输入；随时输入“结束面试”即可提前结束。
-4. 结束后由 `$interview-feedback` 输出带回答证据的优势、问题、评分和下一轮训练动作。
+3. 说“开始面试”，由 `$mock-interviewer` 一次提问一个问题。服务器版可直接使用网页语音转文字；随时输入“结束面试”即可提前结束。
+4. 结束后由 `$interview-feedback` 输出仅基于本轮表现的模拟面试通过概率、带回答证据的总结、优势、专业知识/面试技巧不足和下一轮训练动作。
+
+概率由服务端根据专业知识、项目/科研深度、科研思维、方向匹配和面试表达五类证据按固定权重计算，并按证据覆盖信心收缩；页面只展示这一个概率，不展示分项分数。它用于训练复盘，不等同于最终招生录取率。
 5. 说“再练一轮”会创建新的 session，保留历史记录并复用全局档案。
+
+服务器版在每轮自动规划前提供三组面试官风格选择：主导/倾听、严格/和蔼、循规蹈矩/随心所欲。三个维度独立组合；默认是“主导 + 和蔼 + 循规蹈矩”。风格会影响问题措辞、追问预算和主题顺序，但不改变反馈口径。准备完成后本轮风格锁定，下一轮默认沿用并可重新选择。
 
 也可以显式调用 `$interview-onboarding`、`$interview-planner`、`$mock-interviewer` 或 `$interview-feedback` 进行调试或重试。阶段状态由根目录 `AGENTS.md` 统一路由，不能跳过缺失资料或过期计划。
 
@@ -40,7 +44,29 @@ npm install
 npm run build
 ```
 
-浏览器访问 `http://127.0.0.1:8000`，可使用 `demo/fictional-cv.md` 测试完整闭环。生产环境只在服务器 `.env` 配置 `MIMO_API_KEY`，不要提交密钥。当前版本不进行联网检索，规划资料会明确标注“降级/未联网核验”。
+浏览器访问 `http://127.0.0.1:8000`，可使用 `demo/fictional-cv.md` 测试完整闭环。生产环境只需在服务器 `.env` 配置 `MIMO_API_KEY`；语音识别使用服务器本地模型，不需要额外的 ASR API Key。当前版本不进行联网检索，规划资料会明确标注“降级/未联网核验”。
+
+### 语音转文字
+
+面试进行中可以直接录音，服务端使用本地 `faster-whisper` 模型转写，识别结果会先回填到文本框，由候选人检查或修改后再提交给面试官。上传内容通过请求流限制在内存中，不写入 SQLite 或数据卷；默认单段最多 3 分钟、15 MB。
+
+生产环境在 `.env` 中配置：
+
+```dotenv
+LOCAL_ASR_ENABLED=true
+LOCAL_ASR_MODEL=small
+LOCAL_ASR_MODEL_DIR=/var/lib/ai-interviwer/models
+LOCAL_ASR_COMPUTE_TYPE=int8
+LOCAL_ASR_LANGUAGE=zh
+MAX_AUDIO_BYTES=15728640
+MAX_AUDIO_SECONDS=180
+```
+
+第一次使用某个模型时会下载模型文件并缓存到 `LOCAL_ASR_MODEL_DIR`，之后离线运行；模型下载需要服务器能够访问模型仓库，也可以提前把模型文件放入该目录。`LOCAL_ASR_ENABLED=false` 会关闭语音入口，不影响文字回答。本地 `MOCK_MIMO=true` 时使用固定的虚构转写，不加载模型。
+
+默认 `small` 模型适合中文面试的准确率与 CPU 消耗平衡；内存较小的服务器可以改为 `base`，或把模型目录预先复制到数据卷后再启动服务。
+
+浏览器只允许网页在 HTTPS（或本机 `localhost`）环境调用麦克风。当前公网 IP 的明文 HTTP 页面仍可选择已有录音文件，但要使用“开始语音回答”，必须先给域名配置 HTTPS 反向代理；这也是处理真实简历和真实口语前的必要条件。
 
 服务器首版目录和手动更新方式：
 
@@ -52,7 +78,7 @@ npm run build
 
 首次部署先在服务器执行 `cp .env.example .env`，填入真实的 `MIMO_API_KEY` 并执行 `chmod 600 .env`；之后再运行发布脚本。
 
-在服务器上执行 `bash scripts/deploy.sh` 会拉取 `main`、备份 SQLite、重建容器并检查 `/health`。Docker Compose 将服务暴露为 `http://47.242.251.150:8000`。首版是匿名、24 小时自动清理、明文 HTTP，只适合虚构或充分脱敏简历；真实资料需等 HTTPS 版本。
+在服务器上执行 `bash scripts/deploy.sh` 会拉取 `main`、备份 SQLite、重建容器并检查 `/health`。Docker Compose 将服务暴露为 `http://47.242.251.150:8000`。匿名会话会在 24 小时后自动清理；明文 HTTP 只适合虚构或充分脱敏资料，也不能直接调用浏览器麦克风。
 
 阿里云 Ubuntu 24.04 首次准备（若镜像尚未安装 Docker）：
 
@@ -97,7 +123,7 @@ bash scripts/deploy.sh
 
 - MVP 只服务计算机科研/保研课题组面试，不覆盖大厂实习面试。
 - Codex 侧仍是 instruction-only skills；服务器侧提供 FastAPI、React、SQLite 和 MiMo API 运行时。
-- 服务器首版不做扫描 PDF OCR、音频上传、TTS 或独立 ASR；可使用操作系统/输入法的语音转文字。
+- 服务器支持本地 faster-whisper ASR 和录音文件上传，但不保存音频；暂不做扫描 PDF OCR 或 TTS。
 - 规划资料只使用候选人资料和通用知识，不联网检索，并显式标注未核验范围。
 - 面试官在面试过程中不公布评分、不教学、不提前纠正答案；反馈集中在结束后。
 - 语音输入只是交互建议，不保存音频，也不会因口头语或明显的 ASR 噪声直接扣分。

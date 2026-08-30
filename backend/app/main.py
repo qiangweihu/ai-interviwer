@@ -12,9 +12,22 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .asr import ACCEPTED_AUDIO_TYPES, SpeechToTextError, is_enabled as speech_enabled, provider as speech_provider
 from .config import settings
 from .db import InterviewRun, SessionRecord, cleanup_expired, get_db, init_db, utcnow
-from .schemas import AnswerRequest, AnswerResponse, FeedbackResponse, InterviewStateResponse, SessionResponse, StartResponse
+from .interviewer_styles import catalog, public_style
+from .schemas import (
+    AnswerRequest,
+    AnswerResponse,
+    FeedbackResponse,
+    InterviewerStyleCatalog,
+    InterviewStateResponse,
+    PlanRequest,
+    SessionResponse,
+    StartResponse,
+    SpeechConfigResponse,
+    TranscriptionResponse,
+)
 from .services import (
     ServiceError,
     answer_interview,
@@ -26,6 +39,8 @@ from .services import (
     profile_from_upload,
     start_new_round,
     start_interview,
+    style_for_run,
+    style_for_session,
 )
 
 
@@ -112,6 +127,21 @@ def _preview(run: InterviewRun | None) -> dict | None:
     }
 
 
+def _session_response(session: SessionRecord, db: Session, run: InterviewRun | None = None) -> SessionResponse:
+    current = run if run is not None else get_current_run(db, session)
+    selected_style = style_for_run(current) if current and current.interviewer_style_json else style_for_session(session)
+    return SessionResponse(
+        status=session.status,
+        profile_revision=session.profile_revision,
+        plan_profile_revision=current.plan_profile_revision if current else None,
+        current_run_id=current.id if current else None,
+        expires_at=session.expires_at,
+        profile_complete=session.profile is not None,
+        plan_preview=_preview(current),
+        interviewer_style=public_style(selected_style),
+    )
+
+
 @app.exception_handler(ServiceError)
 async def handle_service_error(_request: Request, exc: ServiceError):
     return JSONResponse(status_code=exc.status_code, content={"detail": str(exc)})
@@ -122,17 +152,21 @@ def health():
     return {"status": "ok", "service": "ai-interviwer"}
 
 
+@app.get("/api/interviewer-styles", response_model=InterviewerStyleCatalog)
+def interviewer_styles():
+    return catalog()
+
+
 @app.post("/api/session", response_model=SessionResponse)
 def create_api_session(response: Response, db: Session = Depends(get_db)):
     record, token = new_session(db)
     response.set_cookie(COOKIE_NAME, token, max_age=settings.session_ttl_hours * 3600, httponly=True, samesite="lax", secure=settings.cookie_secure, path="/")
-    return SessionResponse(status=record.status, profile_revision=record.profile_revision, expires_at=record.expires_at)
+    return _session_response(record, db)
 
 
 @app.get("/api/session", response_model=SessionResponse)
 def read_api_session(session: SessionRecord = Depends(current_session), db: Session = Depends(get_db)):
-    run = get_current_run(db, session)
-    return SessionResponse(status=session.status, profile_revision=session.profile_revision, plan_profile_revision=run.plan_profile_revision if run else None, current_run_id=run.id if run else None, expires_at=session.expires_at, profile_complete=session.profile is not None, plan_preview=_preview(run))
+    return _session_response(session, db)
 
 
 @app.delete("/api/session")
@@ -149,7 +183,7 @@ def new_api_round(session: SessionRecord = Depends(current_session), db: Session
         start_new_round(db, session)
     except ServiceError as exc:
         raise _service_error(exc)
-    return SessionResponse(status=session.status, profile_revision=session.profile_revision, expires_at=session.expires_at, profile_complete=True)
+    return _session_response(session, db)
 
 
 @app.post("/api/profile", response_model=SessionResponse)
@@ -167,19 +201,18 @@ def upload_profile(
         profile_from_upload(db, session, direction, target_group, target_program, resume.filename or "resume.txt", content)
     except ServiceError as exc:
         raise _service_error(exc)
-    run = get_current_run(db, session)
-    return SessionResponse(status=session.status, profile_revision=session.profile_revision, current_run_id=run.id if run else None, expires_at=session.expires_at, profile_complete=True)
+    return _session_response(session, db)
 
 
 @app.post("/api/plan", response_model=SessionResponse)
-def build_plan(request: Request, session: SessionRecord = Depends(current_session), db: Session = Depends(get_db)):
+def build_plan(request: Request, body: PlanRequest | None = None, session: SessionRecord = Depends(current_session), db: Session = Depends(get_db)):
     if not limiter.allow(request.client.host if request.client else "unknown"):
         raise HTTPException(status_code=429, detail="请求过于频繁，请稍后再试。")
     try:
-        run = create_plan(db, session)
+        run = create_plan(db, session, body.interviewer_style if body else None)
     except ServiceError as exc:
         raise _service_error(exc)
-    return SessionResponse(status=session.status, profile_revision=session.profile_revision, plan_profile_revision=run.plan_profile_revision, current_run_id=run.id, expires_at=session.expires_at, profile_complete=True, plan_preview=_preview(run))
+    return _session_response(session, db, run)
 
 
 @app.post("/api/interview/start", response_model=StartResponse)
@@ -215,13 +248,55 @@ def submit_answer(request: Request, body: AnswerRequest, session: SessionRecord 
     return AnswerResponse(status=session.status, question=output.question or None, topic=output.topic or None, turn_sequence=sequence, done=output.done, clarification=output.clarification)
 
 
+@app.get("/api/speech/config", response_model=SpeechConfigResponse)
+def speech_config():
+    return SpeechConfigResponse(
+        enabled=speech_enabled(),
+        max_audio_bytes=settings.max_audio_bytes,
+        max_audio_seconds=settings.max_audio_seconds,
+        accepted_types=sorted(ACCEPTED_AUDIO_TYPES),
+    )
+
+
+@app.post("/api/interview/transcribe", response_model=TranscriptionResponse)
+async def transcribe_answer(
+    request: Request,
+    session: SessionRecord = Depends(current_session),
+    db: Session = Depends(get_db),
+):
+    run = get_current_run(db, session)
+    if not run or run.status != "interview_in_progress":
+        raise HTTPException(status_code=409, detail="只有面试进行中才能转写回答。")
+    if not speech_enabled():
+        raise HTTPException(status_code=503, detail="服务器尚未启用本地语音转文字。")
+    if not limiter.allow(request.client.host if request.client else "unknown"):
+        raise HTTPException(status_code=429, detail="本小时语音转写次数已达到匿名上限，请稍后再试。")
+    content_type = (request.headers.get("content-type") or "").lower().split(";", 1)[0]
+    if content_type not in ACCEPTED_AUDIO_TYPES:
+        raise HTTPException(status_code=415, detail="不支持这种录音格式，请使用 WebM、MP4、MP3、M4A 或 WAV。")
+    content_buffer = bytearray()
+    async for chunk in request.stream():
+        content_buffer.extend(chunk)
+        if len(content_buffer) > settings.max_audio_bytes:
+            raise HTTPException(status_code=413, detail=f"录音文件不能超过 {settings.max_audio_bytes // (1024 * 1024)} MB。")
+    content = bytes(content_buffer)
+    if not content:
+        raise HTTPException(status_code=422, detail="录音内容为空，请重新录制。")
+    extension = {"audio/mp4": "m4a", "video/mp4": "m4a", "audio/mpeg": "mp3", "audio/wav": "wav", "audio/ogg": "ogg", "audio/flac": "flac"}.get(content_type, "webm")
+    try:
+        result = await asyncio.to_thread(speech_provider().transcribe, f"answer.{extension}", content, content_type)
+    except SpeechToTextError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return TranscriptionResponse(text=result.text)
+
+
 @app.post("/api/interview/end", response_model=SessionResponse)
 def finish_interview(session: SessionRecord = Depends(current_session), db: Session = Depends(get_db)):
     try:
         run = end_interview(db, session)
     except ServiceError as exc:
         raise _service_error(exc)
-    return SessionResponse(status=session.status, profile_revision=session.profile_revision, plan_profile_revision=run.plan_profile_revision, current_run_id=run.id, expires_at=session.expires_at, profile_complete=True)
+    return _session_response(session, db, run)
 
 
 @app.post("/api/feedback", response_model=FeedbackResponse)

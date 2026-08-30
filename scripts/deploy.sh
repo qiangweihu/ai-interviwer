@@ -10,7 +10,7 @@ if [[ ! -f .env ]]; then
 fi
 git fetch origin
 git pull --ff-only origin main
-mkdir -p "$DATA_DIR/backups"
+mkdir -p "$DATA_DIR/backups" "$DATA_DIR/models"
 if [[ -f "$DATA_DIR/interview.db" ]]; then
   cp "$DATA_DIR/interview.db" "$DATA_DIR/backups/interview-$(date +%Y%m%d-%H%M%S).db"
 fi

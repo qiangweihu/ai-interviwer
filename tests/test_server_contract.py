@@ -3,13 +3,34 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from backend.app.schemas import PlanPayload, ResearchBriefPayload
+from backend.app.schemas import FeedbackPayload, PlanPayload, ResearchBriefPayload
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class ServerScaffoldContractTests(unittest.TestCase):
+    def test_feedback_contract_exposes_one_probability_and_two_gap_groups(self):
+        public = FeedbackPayload.model_validate(
+            {
+                "interview_pass_probability": 68,
+                "overall": "总结",
+                "evidence_coverage": "覆盖充分",
+                "confidence": "高",
+                "strengths": ["能给出证据"],
+                "professional_knowledge_gaps": [],
+                "interview_skill_gaps": [],
+                "improvement_examples": [],
+                "priority_drills": ["练习一", "练习二", "练习三"],
+                "next_round": "继续追问",
+            }
+        )
+        self.assertGreaterEqual(public.interview_pass_probability, 5)
+        self.assertLessEqual(public.interview_pass_probability, 95)
+        self.assertNotIn("ratings", public.model_dump())
+        self.assertIn("professional_knowledge_gaps", public.model_dump())
+        self.assertIn("interview_skill_gaps", public.model_dump())
+
     def test_short_model_plan_is_completed_to_minimum_topic_count(self):
         topics = [
             {
@@ -32,7 +53,9 @@ class ServerScaffoldContractTests(unittest.TestCase):
             "backend/app/main.py",
             "backend/app/services.py",
             "backend/app/db.py",
+            "backend/app/interviewer_styles.py",
             "backend/app/mimo.py",
+            "backend/migrations/versions/0002_interviewer_styles.py",
             "frontend/src/App.tsx",
             "Dockerfile",
             "docker-compose.yml",
@@ -41,8 +64,20 @@ class ServerScaffoldContractTests(unittest.TestCase):
         ):
             self.assertTrue((ROOT / path).exists(), path)
         main = (ROOT / "backend/app/main.py").read_text(encoding="utf-8")
-        for route in ("/api/session", "/api/profile", "/api/plan", "/api/interview/start", "/api/interview/answer", "/api/interview/end", "/api/feedback", "/health"):
+        for route in ("/api/session", "/api/profile", "/api/plan", "/api/interviewer-styles", "/api/interview/start", "/api/interview/answer", "/api/interview/transcribe", "/api/interview/end", "/api/feedback", "/health"):
             self.assertIn(route, main)
+
+    def test_audio_is_streamed_in_memory_and_not_persisted(self):
+        main = (ROOT / "backend/app/main.py").read_text(encoding="utf-8")
+        asr = (ROOT / "backend/app/asr.py").read_text(encoding="utf-8")
+        requirements = (ROOT / "backend/requirements.txt").read_text(encoding="utf-8")
+        env = (ROOT / ".env.example").read_text(encoding="utf-8")
+        self.assertIn("request.stream()", main)
+        self.assertNotIn("open(", asr)
+        self.assertNotIn("Temporary", asr)
+        self.assertIn("faster-whisper", requirements)
+        self.assertIn("LOCAL_ASR_MODEL", env)
+        self.assertNotIn("ASR_API_KEY", env)
 
     def test_runtime_does_not_use_codex_skill_discovery(self):
         runtime = "\n".join(p.read_text(encoding="utf-8") for p in (ROOT / "backend/app").glob("*.py"))

@@ -52,7 +52,7 @@ class FrameworkContractTests(unittest.TestCase):
             self.assertIn(phrase, planner)
         for phrase in ("只发送第一个问题", "不公布分数", "ASR", "ready_for_feedback"):
             self.assertIn(phrase, interviewer)
-        for phrase in ("专业基础", "项目深度", "科研思维", "方向匹配", "表达沟通", "三个优先训练动作"):
+        for phrase in ("模拟面试通过概率", "专业知识方面不足", "面试技巧方面不足", "科研思维", "三个优先训练动作"):
             self.assertIn(phrase, feedback)
 
 

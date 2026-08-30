@@ -25,6 +25,7 @@ class SessionRecord(Base):
     status: Mapped[str] = mapped_column(String(32), default="needs_onboarding", index=True)
     profile_revision: Mapped[int] = mapped_column(Integer, default=0)
     current_run_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    preferred_interviewer_style_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
     expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
@@ -59,6 +60,7 @@ class InterviewRun(Base):
     plan_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     research_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     feedback_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    interviewer_style_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -102,6 +104,7 @@ class InterviewTurn(Base):
     role: Mapped[str] = mapped_column(String(16))
     content: Mapped[str] = mapped_column(Text)
     topic: Mapped[str | None] = mapped_column(Text, nullable=True)
+    plan_topic_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     request_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 

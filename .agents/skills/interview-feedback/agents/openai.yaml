@@ -1,7 +1,7 @@
 interface:
   display_name: "科研面试反馈"
   short_description: "输出证据化面试反馈"
-  default_prompt: "使用 $interview-feedback 根据本次面试记录生成证据化反馈。"
+  default_prompt: "使用 $interview-feedback 根据本次面试记录生成模拟面试通过概率、证据化总结和训练建议。"
 
 policy:
   allow_implicit_invocation: true

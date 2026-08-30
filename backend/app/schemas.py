@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 STATES = {
@@ -16,6 +17,73 @@ STATES = {
 }
 
 
+class InterviewerStyleSelection(BaseModel):
+    """The only style values accepted from the client.
+
+    ``control``/``plan_adherence`` were the names in the first server
+    prototype. Normalize them here so an old browser can be upgraded without
+    silently falling back to the default style.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    initiative: Literal["leading", "listening"] = "leading"
+    tone: Literal["strict", "friendly"] = "friendly"
+    structure: Literal["structured", "adaptive"] = "structured"
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_legacy_keys(cls, value: Any):
+        if not isinstance(value, Mapping):
+            return value
+        normalized = dict(value)
+        if "control" in normalized:
+            control = normalized.pop("control")
+            mapped = {"dominant": "leading", "listener": "listening"}.get(control, control) if isinstance(control, str) else control
+            if "initiative" in normalized and normalized["initiative"] != mapped:
+                raise ValueError("面试官风格的对话控制字段冲突。")
+            normalized["initiative"] = mapped
+        if "plan_adherence" in normalized:
+            adherence = normalized.pop("plan_adherence")
+            mapped = {"flexible": "adaptive"}.get(adherence, adherence) if isinstance(adherence, str) else adherence
+            if "structure" in normalized and normalized["structure"] != mapped:
+                raise ValueError("面试官风格的流程字段冲突。")
+            normalized["structure"] = mapped
+        return normalized
+
+
+class InterviewerStylePublic(InterviewerStyleSelection):
+    version: str
+    name: str
+    summary: str
+    traits: list[str] = Field(default_factory=list)
+    preset_id: str = "guided_interviewer"
+    # Read-only compatibility fields included in responses. Requests should
+    # continue using InterviewerStyleSelection and cannot provide these.
+    control: Literal["dominant", "listener"] | None = None
+    plan_adherence: Literal["structured", "flexible"] | None = None
+
+    @model_validator(mode="after")
+    def populate_legacy_fields(self):
+        self.control = "dominant" if self.initiative == "leading" else "listener"
+        self.plan_adherence = "flexible" if self.structure == "adaptive" else "structured"
+        return self
+
+
+class InterviewerStyleCatalog(BaseModel):
+    version: str
+    default_preset_id: str = "guided_interviewer"
+    default_selection: InterviewerStyleSelection
+    dimensions: dict[str, Any]
+    presets: list[InterviewerStylePublic] = Field(default_factory=list)
+
+
+class PlanRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    interviewer_style: InterviewerStyleSelection | None = None
+
+
 class SessionResponse(BaseModel):
     status: str
     profile_revision: int
@@ -24,6 +92,7 @@ class SessionResponse(BaseModel):
     expires_at: datetime
     profile_complete: bool = False
     plan_preview: dict[str, Any] | None = None
+    interviewer_style: InterviewerStylePublic | None = None
 
 
 class PlanTopic(BaseModel):
@@ -71,7 +140,7 @@ class PlanPayload(BaseModel):
                 "core_question": "请解释目标方向中一个尚未展开的核心概念，并说明它的适用边界。",
                 "followups": ["这个概念依赖哪些关键假设？"],
                 "expected_evidence": ["定义、机制、边界"],
-                "evaluation_dimensions": ["专业基础"],
+                "evaluation_dimensions": ["专业知识与基础"],
                 "minutes": 2,
             },
             {
@@ -98,7 +167,7 @@ class PlanPayload(BaseModel):
                 "core_question": "请回顾一次没有达到预期的尝试，并说明你会如何改进。",
                 "followups": ["你如何判断改进是否有效？"],
                 "expected_evidence": ["事实、反思、行动"],
-                "evaluation_dimensions": ["表达沟通"],
+                "evaluation_dimensions": ["面试表达与应答"],
                 "minutes": 2,
             },
         ]
@@ -163,6 +232,17 @@ class AnswerResponse(BaseModel):
     clarification: bool = False
 
 
+class TranscriptionResponse(BaseModel):
+    text: str
+
+
+class SpeechConfigResponse(BaseModel):
+    enabled: bool
+    max_audio_bytes: int
+    max_audio_seconds: int
+    accepted_types: list[str]
+
+
 class IssuePayload(BaseModel):
     category: str
     statement: str
@@ -170,19 +250,45 @@ class IssuePayload(BaseModel):
     action: str
 
 
-class RatingPayload(BaseModel):
-    score: int = Field(ge=1, le=5)
+class FeedbackDimensionAssessment(BaseModel):
+    """Internal evidence assessment used to calculate the public probability.
+
+    These values are never returned by the API.  Keeping them separate from
+    ``FeedbackPayload`` prevents the UI from accidentally exposing another
+    competing score alongside the single probability.
+    """
+
+    score: int = Field(ge=0, le=100)
     evidence: list[str] = Field(default_factory=list)
     confidence: Literal["高", "中", "低"] = "中"
 
 
-class FeedbackPayload(BaseModel):
+class FeedbackAssessmentPayload(BaseModel):
+    """Model response contract before deterministic probability calculation."""
+
     overall: str
     evidence_coverage: str
     confidence: Literal["高", "中", "低"] = "中"
-    ratings: dict[str, RatingPayload]
+    dimension_scores: dict[str, FeedbackDimensionAssessment] = Field(default_factory=dict)
     strengths: list[str] = Field(default_factory=list)
-    issues: list[IssuePayload] = Field(default_factory=list)
+    professional_knowledge_gaps: list[IssuePayload] = Field(default_factory=list)
+    interview_skill_gaps: list[IssuePayload] = Field(default_factory=list)
+    improvement_examples: list[str] = Field(default_factory=list)
+    priority_drills: list[str] = Field(min_length=3, max_length=3)
+    next_round: str
+
+
+class FeedbackPayload(BaseModel):
+    """Public feedback contract: one probability, then evidence-based text."""
+
+    feedback_version: Literal["2"] = "2"
+    interview_pass_probability: int = Field(ge=5, le=95)
+    overall: str
+    evidence_coverage: str
+    confidence: Literal["高", "中", "低"] = "中"
+    strengths: list[str] = Field(default_factory=list)
+    professional_knowledge_gaps: list[IssuePayload] = Field(default_factory=list)
+    interview_skill_gaps: list[IssuePayload] = Field(default_factory=list)
     improvement_examples: list[str] = Field(default_factory=list)
     priority_drills: list[str] = Field(min_length=3, max_length=3)
     next_round: str

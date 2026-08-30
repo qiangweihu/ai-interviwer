@@ -20,6 +20,13 @@ class Settings:
     max_resume_bytes: int = int(os.getenv("MAX_RESUME_BYTES", str(10 * 1024 * 1024)))
     max_answer_chars: int = int(os.getenv("MAX_ANSWER_CHARS", "12000"))
     max_model_calls_per_hour: int = int(os.getenv("MAX_MODEL_CALLS_PER_HOUR", "60"))
+    local_asr_enabled: bool = os.getenv("LOCAL_ASR_ENABLED", "true").lower() in {"1", "true", "yes"}
+    local_asr_model: str = os.getenv("LOCAL_ASR_MODEL", "small")
+    local_asr_model_dir: str = os.getenv("LOCAL_ASR_MODEL_DIR", "")
+    local_asr_compute_type: str = os.getenv("LOCAL_ASR_COMPUTE_TYPE", "int8")
+    local_asr_language: str = os.getenv("LOCAL_ASR_LANGUAGE", "zh")
+    max_audio_bytes: int = int(os.getenv("MAX_AUDIO_BYTES", str(15 * 1024 * 1024)))
+    max_audio_seconds: int = int(os.getenv("MAX_AUDIO_SECONDS", "180"))
 
     @property
     def database_url(self) -> str:

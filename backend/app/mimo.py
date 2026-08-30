@@ -73,32 +73,52 @@ class DemoMiMoClient(MiMoClient):
                 "uncertainty": ["本轮只使用通用知识，目标课题组具体近期方向待核验"],
             }
         elif "面试规划器" in system:
+            if "优先让候选人完整展开" in user:
+                first_question = "请从你最熟悉的一段经历开始，完整介绍它与你目标方向的联系。"
+            elif "主动控制面试节奏" in user:
+                first_question = "请具体说明你目标方向中的一个核心问题，以及你判断它重要的依据。"
+            else:
+                first_question = "请说明你目标方向中的一个核心问题，以及你会如何验证它。"
             payload = {
                 "duration_minutes": 25,
                 "main_question_count": 8,
                 "topics": [
-                    {"title": "方向基础", "objective": "检查核心概念", "core_question": "请解释你目标方向中的一个核心问题。", "followups": ["它的关键假设是什么？"], "expected_evidence": ["定义、机制、边界"], "evaluation_dimensions": ["专业基础"], "minutes": 3},
-                    {"title": "项目深挖", "objective": "核验个人贡献", "core_question": "请具体说明简历中一个项目里你负责的工作。", "followups": ["如何验证结果？"], "expected_evidence": ["角色、方法、结果"], "evaluation_dimensions": ["项目深度"], "minutes": 4},
+                    {"title": "方向基础", "objective": "检查核心概念", "core_question": first_question, "followups": ["它的关键假设是什么？"], "expected_evidence": ["定义、机制、边界"], "evaluation_dimensions": ["专业知识与基础"], "minutes": 3},
+                    {"title": "项目深挖", "objective": "核验个人贡献", "core_question": "请具体说明简历中一个项目里你负责的工作。", "followups": ["如何验证结果？"], "expected_evidence": ["角色、方法、结果"], "evaluation_dimensions": ["项目与科研经历深度"], "minutes": 4},
                     {"title": "实验设计", "objective": "检查因果推理", "core_question": "如果结果提升，你会如何设计对照和消融？", "followups": ["失败时先检查什么？"], "expected_evidence": ["假设、指标、对照"], "evaluation_dimensions": ["科研思维"], "minutes": 4},
                     {"title": "科研开放题", "objective": "检查问题拆解", "core_question": "请提出一个可在一个月内验证的研究问题。", "followups": ["最小实验是什么？"], "expected_evidence": ["可验证问题"], "evaluation_dimensions": ["科研思维"], "minutes": 3},
                     {"title": "方向匹配", "objective": "理解动机", "core_question": "为什么希望加入这个方向的课题组？", "followups": ["你准备先补哪项能力？"], "expected_evidence": ["具体关联"], "evaluation_dimensions": ["方向匹配"], "minutes": 3},
-                    {"title": "沟通反思", "objective": "检查复盘能力", "core_question": "回顾一个没有达到预期的尝试，你学到了什么？", "followups": ["下一次会怎么改？"], "expected_evidence": ["事实和反思"], "evaluation_dimensions": ["表达沟通"], "minutes": 3},
-                    {"title": "综合追问", "objective": "检查迁移能力", "core_question": "如果数据分布改变，你会优先重新评估什么？", "followups": [], "expected_evidence": ["风险意识"], "evaluation_dimensions": ["专业基础"], "minutes": 2},
+                    {"title": "沟通反思", "objective": "检查复盘能力", "core_question": "回顾一个没有达到预期的尝试，你学到了什么？", "followups": ["下一次会怎么改？"], "expected_evidence": ["事实和反思"], "evaluation_dimensions": ["面试表达与应答"], "minutes": 3},
+                    {"title": "综合追问", "objective": "检查迁移能力", "core_question": "如果数据分布改变，你会优先重新评估什么？", "followups": [], "expected_evidence": ["风险意识"], "evaluation_dimensions": ["专业知识与基础"], "minutes": 2},
                     {"title": "收尾", "objective": "确认学习计划", "core_question": "进入课题组后，你希望如何开始第一周的学习？", "followups": [], "expected_evidence": ["行动计划"], "evaluation_dimensions": ["方向匹配"], "minutes": 2},
                 ],
             }
+        elif "第一道问题" in user:
+            if "严格按照面试计划顺序推进" in system and "主动控制面试节奏" in system:
+                question = "请按结论、方法、证据三个部分说明你目标方向中的一个核心问题。"
+            elif "优先让候选人完整展开" in system:
+                question = "请先完整、具体地介绍一段与你目标方向最相关的经历。"
+            else:
+                question = "请具体说明你目标方向中的一个核心问题，以及你判断它重要的依据。"
+            payload = {"question": question, "topic": "方向基础", "topic_index": 0, "done": False, "clarification": False, "observation": "", "next_action": "next_topic"}
         elif "面试官" in system:
             self.interview_count += 1
-            payload = {"question": "请再举一个具体例子说明你的判断。", "topic": "动态追问", "done": False, "clarification": False, "observation": "候选人回答已记录，待继续核验具体依据。", "next_action": "follow_up"}
+            payload = {"question": "请再举一个具体例子说明你的判断。", "topic": "动态追问", "topic_index": None, "done": False, "clarification": False, "observation": "候选人回答已记录，待继续核验具体依据。", "next_action": "follow_up"}
         elif "反馈教练" in system:
-            dims = ["专业基础", "项目深度", "科研思维", "方向匹配", "表达沟通"]
             payload = {
-                "overall": "本轮完成了结构化问答，结论仅覆盖已提供的回答证据。",
+                "overall": "候选人能够围绕问题给出基本判断，具备继续训练的基础；本轮对项目细节和实验论证的证据仍然有限。",
                 "evidence_coverage": "基于本轮转录和候选人档案，证据覆盖有限。",
                 "confidence": "中",
-                "ratings": {d: {"score": 3, "evidence": ["第 1 轮及候选人档案（待结合具体回答复核）"], "confidence": "低"} for d in dims},
+                "dimension_scores": {
+                    "专业知识与基础": {"score": 68, "evidence": ["第 1 轮能围绕方向核心概念作出基本说明"], "confidence": "中"},
+                    "项目与科研经历深度": {"score": 58, "evidence": ["候选人档案列出项目，但本轮缺少个人贡献和复现实验细节"], "confidence": "低"},
+                    "科研思维": {"score": 55, "evidence": ["回答提到指标和对照，但尚未展开因果验证"], "confidence": "低"},
+                    "方向匹配": {"score": 70, "evidence": ["候选人档案中的研究兴趣与目标方向相关"], "confidence": "中"},
+                    "面试表达与应答": {"score": 72, "evidence": ["第 1 轮能够直接回应问题并继续说明思路"], "confidence": "中"},
+                },
                 "strengths": ["愿意说明自己的思路", "能够围绕问题继续回答"],
-                "issues": [{"category": "推理", "statement": "需要补充可验证的对照和指标。", "evidence": ["面试转录"], "action": "用假设—指标—对照三行卡片练习。"}],
+                "professional_knowledge_gaps": [{"category": "科研推理", "statement": "需要补充可验证的对照和指标。", "evidence": ["面试转录"], "action": "用假设—指标—对照三行卡片练习。"}],
+                "interview_skill_gaps": [],
                 "improvement_examples": ["先给结论，再说明机制、证据和局限。"],
                 "priority_drills": ["为一个项目写单变量消融表。", "用三分钟解释一个核心概念并录音复盘。", "每天写一张假设—指标—对照—失败解释卡片。"],
                 "next_round": "增加项目结果因果性和失败复盘追问。",
