@@ -12,6 +12,25 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+// randomUUID() is only exposed by some browsers in secure contexts. The
+// server uses this value only for answer idempotency, so keep a compatible
+// fallback for the HTTP/IP deployment and older Safari versions.
+function createRequestId(): string {
+  const webCrypto = typeof globalThis.crypto !== "undefined" ? globalThis.crypto : undefined;
+  if (webCrypto && typeof webCrypto.randomUUID === "function") {
+    return webCrypto.randomUUID();
+  }
+  if (webCrypto && typeof webCrypto.getRandomValues === "function") {
+    const bytes = new Uint8Array(16);
+    webCrypto.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (value) => value.toString(16).padStart(2, "0"));
+    return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+}
+
 function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [error, setError] = useState("");
@@ -91,7 +110,7 @@ function App() {
   const start = () => void run(async () => { const result = await api<{ question: string; topic?: string }>("/api/interview/start", { method: "POST" }); setQuestion(result.question); setTopic(result.topic || ""); setPaused(false); setSession((old) => old ? { ...old, status: "interview_in_progress" } : old); });
   const submitAnswer = (event: FormEvent) => {
     event.preventDefault();
-    void run(async () => { const text = answer.trim(); if (!text) return; const requestId = crypto.randomUUID(); setTurns((old) => [...old, { role: "candidate", content: text }]); const result = await api<{ question?: string; topic?: string; done: boolean }>("/api/interview/answer", { method: "POST", headers: { "Content-Type": "application/json", "X-Request-ID": requestId }, body: JSON.stringify({ answer: text, request_id: requestId }) }); setAnswer(""); if (result.done) { setQuestion(""); setSession((old) => old ? { ...old, status: "ready_for_feedback" } : old); } else { setTurns((old) => [...old, { role: "interviewer", content: result.question || "" }]); setQuestion(result.question || ""); setTopic(result.topic || ""); } });
+    void run(async () => { const text = answer.trim(); if (!text) return; const requestId = createRequestId(); setTurns((old) => [...old, { role: "candidate", content: text }]); const result = await api<{ question?: string; topic?: string; done: boolean }>("/api/interview/answer", { method: "POST", headers: { "Content-Type": "application/json", "X-Request-ID": requestId }, body: JSON.stringify({ answer: text, request_id: requestId }) }); setAnswer(""); if (result.done) { setQuestion(""); setSession((old) => old ? { ...old, status: "ready_for_feedback" } : old); } else { setTurns((old) => [...old, { role: "interviewer", content: result.question || "" }]); setQuestion(result.question || ""); setTopic(result.topic || ""); } });
   };
   const finish = () => void run(async () => { await api("/api/interview/end", { method: "POST" }); setQuestion(""); setSession((old) => old ? { ...old, status: "ready_for_feedback" } : old); });
   const makeFeedback = () => void run(async () => { const result = await api<{ feedback: Feedback }>("/api/feedback", { method: "POST" }); setFeedback(result.feedback); setSession((old) => old ? { ...old, status: "complete" } : old); });
