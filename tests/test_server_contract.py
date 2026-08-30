@@ -1,7 +1,9 @@
 import unittest
 from pathlib import Path
 
-from backend.app.schemas import PlanPayload
+from pydantic import ValidationError
+
+from backend.app.schemas import PlanPayload, ResearchBriefPayload
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,7 +47,23 @@ class ServerScaffoldContractTests(unittest.TestCase):
     def test_runtime_does_not_use_codex_skill_discovery(self):
         runtime = "\n".join(p.read_text(encoding="utf-8") for p in (ROOT / "backend/app").glob("*.py"))
         self.assertNotIn("subprocess", runtime)
+        self.assertNotIn("web_search", runtime.lower())
+        self.assertNotIn("MIMO_WEB_SEARCH_ENABLED", (ROOT / ".env.example").read_text(encoding="utf-8"))
         self.assertIn("mimo-v2.5-pro", (ROOT / ".env.example").read_text(encoding="utf-8"))
+
+    def test_research_contract_is_offline_only(self):
+        brief = ResearchBriefPayload.model_validate(
+            {
+                "research_status": "degraded",
+                "key_conclusions": ["通用结论"],
+                "uncertainty": [],
+                "sources": [{"url": "https://example.com"}],
+            }
+        )
+        self.assertEqual(brief.research_status, "degraded")
+        self.assertNotIn("sources", brief.model_dump())
+        with self.assertRaises(ValidationError):
+            ResearchBriefPayload.model_validate({"research_status": "verified"})
 
     def test_resume_upload_is_temporary_and_secrets_are_ignored(self):
         ignore = (ROOT / ".gitignore").read_text(encoding="utf-8")

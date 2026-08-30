@@ -37,7 +37,8 @@ class FrameworkContractTests(unittest.TestCase):
         cv = (ROOT / "demo" / "fictional-cv.md").read_text(encoding="utf-8")
         brief = (ROOT / "demo" / "fictional-research-brief.md").read_text(encoding="utf-8")
         self.assertIn("虚构", cv)
-        self.assertIn("demo-only", brief)
+        self.assertIn("research_status: degraded", brief)
+        self.assertIn("未联网核验", brief)
         self.assertNotIn("@", cv)
 
     def test_behavioral_constraints_are_documented(self):
@@ -47,7 +48,7 @@ class FrameworkContractTests(unittest.TestCase):
         feedback = (ROOT / ".agents/skills/interview-feedback/SKILL.md").read_text(encoding="utf-8")
         for file_type in ("PDF", "DOCX", "Markdown", "TXT"):
             self.assertIn(file_type, onboarding)
-        for phrase in ("8–12", "research_status: degraded", "来源", "预期证据"):
+        for phrase in ("8–12", "research_status: degraded", "不联网", "预期证据"):
             self.assertIn(phrase, planner)
         for phrase in ("只发送第一个问题", "不公布分数", "ASR", "ready_for_feedback"):
             self.assertIn(phrase, interviewer)

@@ -10,12 +10,12 @@ JSON 字段必须为：education(string), courses(array[string]), projects(array
 {resume}
 --- 简历结束 ---"""
 
-RESEARCH_SYSTEM = """你是科研面试规划器的资料研究模块。围绕候选人的具体方向给出少量高信号、可核验的基础资料。若没有可用检索结果，明确使用 degraded。返回严格 JSON。"""
+RESEARCH_SYSTEM = """你是科研面试规划器的背景资料模块。围绕候选人的具体方向整理少量高信号的通用基础知识，不能声称已联网检索、不能臆造课题组近期事实或来源。研究状态固定为 degraded，返回严格 JSON。"""
 RESEARCH_USER = """目标方向：{direction}
 目标课题组：{group}
 候选人档案：{profile}
 
-请输出 JSON：research_status（verified 或 degraded）、key_conclusions（数组）、uncertainty（数组）、sources（数组，每项包含 title,url,accessed_at,conclusion,relation,verified）。不要臆造课题组事实。"""
+请输出 JSON：research_status（只能为 degraded）、key_conclusions（数组）、uncertainty（数组）。明确标注内容未联网核验，不要臆造课题组事实、论文、URL 或来源。"""
 
 PLAN_SYSTEM = """你是计算机科研/保研面试规划器。基于研究资料和候选人档案生成约 25 分钟、8–12 个主问题的计划。必须返回至少 8 个且不超过 12 个 topics；输出前逐项检查 topics 数量和 main_question_count 是否一致，不能只返回 7 个主题。必须覆盖专业基础、项目深挖、科研思维、方向匹配、沟通反思。每个主题要给考察目标、一个核心问题、最多三个追问、预期证据、评价维度和建议时间。返回严格 JSON。"""
 PLAN_USER = """方向：{direction}

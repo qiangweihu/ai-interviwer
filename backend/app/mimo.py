@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
 
 from .config import settings
 
@@ -14,7 +13,6 @@ class MiMoError(RuntimeError):
 @dataclass
 class Completion:
     content: str
-    annotations: list[dict[str, Any]]
 
 
 class MiMoClient:
@@ -36,20 +34,15 @@ class MiMoClient:
                 raise MiMoError(f"无法初始化 MiMo 客户端：{exc}") from exc
         return self._client
 
-    def complete(self, system: str, user: str, *, web_search: bool = False) -> Completion:
-        tools = None
-        if web_search:
-            tools = [{"type": "web_search", "max_keyword": 3, "force_search": True, "limit": 1}]
+    def complete(self, system: str, user: str) -> Completion:
         try:
             response = self._openai().chat.completions.create(
                 model=self.model,
                 messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
                 temperature=0.2,
-                tools=tools,
             )
             message = response.choices[0].message
-            annotations = list(getattr(message, "annotations", None) or [])
-            return Completion(content=message.content or "", annotations=annotations)
+            return Completion(content=message.content or "")
         except Exception as exc:
             raise MiMoError(f"MiMo 请求失败：{exc}") from exc
 
@@ -61,9 +54,7 @@ class DemoMiMoClient(MiMoClient):
         super().__init__(api_key="demo")
         self.interview_count = 0
 
-    def complete(self, system: str, user: str, *, web_search: bool = False) -> Completion:
-        from datetime import date
-
+    def complete(self, system: str, user: str) -> Completion:
         if "资料整理器" in system:
             payload = {
                 "education": "简历中列出的计算机相关教育经历",
@@ -77,10 +68,9 @@ class DemoMiMoClient(MiMoClient):
             }
         elif "资料研究模块" in system:
             payload = {
-                "research_status": "degraded" if not web_search else "verified",
+                "research_status": "degraded",
                 "key_conclusions": ["视觉表征学习需要明确数据、目标和评价指标"],
-                "uncertainty": ["目标课题组具体近期方向待核验"],
-                "sources": [] if not web_search else [{"title": "Demo research source", "url": "https://example.com", "accessed_at": str(date.today()), "conclusion": "仅作测试来源", "relation": "用于测试引用链路", "verified": True}],
+                "uncertainty": ["本轮只使用通用知识，目标课题组具体近期方向待核验"],
             }
         elif "面试规划器" in system:
             payload = {
@@ -115,4 +105,4 @@ class DemoMiMoClient(MiMoClient):
             }
         else:
             payload = {}
-        return Completion(content=json.dumps(payload, ensure_ascii=False), annotations=[])
+        return Completion(content=json.dumps(payload, ensure_ascii=False))

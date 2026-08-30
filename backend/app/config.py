@@ -14,11 +14,6 @@ class Settings:
     mimo_api_key: str = os.getenv("MIMO_API_KEY", "")
     mimo_base_url: str = os.getenv("MIMO_BASE_URL", "https://api.xiaomimimo.com/v1")
     mimo_model: str = os.getenv("MIMO_MODEL", "mimo-v2.5-pro")
-    mimo_web_search_enabled: bool = os.getenv("MIMO_WEB_SEARCH_ENABLED", "false").lower() in {
-        "1",
-        "true",
-        "yes",
-    }
     mock_mimo: bool = os.getenv("MOCK_MIMO", "false").lower() in {"1", "true", "yes"}
     cookie_secure: bool = os.getenv("COOKIE_SECURE", "false").lower() in {"1", "true", "yes"}
     session_ttl_hours: int = int(os.getenv("SESSION_TTL_HOURS", "24"))

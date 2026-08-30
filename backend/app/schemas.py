@@ -36,20 +36,11 @@ class PlanTopic(BaseModel):
     minutes: int = Field(default=2, ge=1, le=10)
 
 
-class ResearchSourcePayload(BaseModel):
-    title: str
-    url: str
-    accessed_at: str
-    conclusion: str
-    relation: str
-    verified: bool = False
-
-
 class ResearchBriefPayload(BaseModel):
-    research_status: Literal["verified", "degraded"]
+    # The current MVP deliberately does not perform external retrieval.
+    research_status: Literal["degraded"] = "degraded"
     key_conclusions: list[str] = Field(default_factory=list)
     uncertainty: list[str] = Field(default_factory=list)
-    sources: list[ResearchSourcePayload] = Field(default_factory=list)
 
 
 class PlanPayload(BaseModel):

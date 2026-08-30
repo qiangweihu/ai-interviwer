@@ -38,4 +38,4 @@ metadata:
 - `.interview/profile/candidate-profile.md`
 - `.interview/state.md`
 
-不得生成真实资料的副本到仓库跟踪目录，也不得自动联网搜索研究内容；联网研究由 `$interview-planner` 负责。
+不得生成真实资料的副本到仓库跟踪目录，也不得自动联网搜索研究内容；当前版本的规划只使用候选人资料和通用知识。

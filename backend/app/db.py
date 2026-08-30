@@ -63,12 +63,22 @@ class InterviewRun(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
     session: Mapped[SessionRecord] = relationship(back_populates="runs")
+    # `research_sources` is retained in the ORM solely so existing databases
+    # can still be opened and cleaned up. New runs never create source rows;
+    # external research was removed from the runtime.
     sources: Mapped[list["ResearchSource"]] = relationship(back_populates="run", cascade="all, delete-orphan")
     turns: Mapped[list["InterviewTurn"]] = relationship(back_populates="run", cascade="all, delete-orphan", order_by="InterviewTurn.sequence")
     observations: Mapped[list["Observation"]] = relationship(back_populates="run", cascade="all, delete-orphan")
 
 
 class ResearchSource(Base):
+    """Historical source rows kept for backwards-compatible database cleanup.
+
+    The current planner is intentionally offline and does not read or write
+    this table. Keep the mapping until a deliberate data migration removes the
+    legacy table from all deployments.
+    """
+
     __tablename__ = "research_sources"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any, Literal, TypeVar
 
 from pydantic import BaseModel, ValidationError
@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .config import settings
-from .db import InterviewRun, InterviewTurn, Observation, Profile, ResearchSource, SessionRecord, utcnow
+from .db import InterviewRun, InterviewTurn, Observation, Profile, SessionRecord, utcnow
 from .mimo import DemoMiMoClient, MiMoClient, MiMoError
 from .parsing import ResumeParseError, parse_resume
 from .prompts import (
@@ -27,7 +27,7 @@ from .prompts import (
     RESEARCH_SYSTEM,
     RESEARCH_USER,
 )
-from .schemas import FeedbackPayload, PlanPayload, ResearchBriefPayload, ResearchSourcePayload
+from .schemas import FeedbackPayload, PlanPayload, ResearchBriefPayload
 
 
 T = TypeVar("T", bound=BaseModel)
@@ -47,15 +47,15 @@ def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
-def _model_json(client: MiMoClient, system: str, user: str, schema: type[T], *, web_search: bool = False) -> tuple[T, list[dict[str, Any]]]:
+def _model_json(client: MiMoClient, system: str, user: str, schema: type[T]) -> T:
     try:
-        completion = client.complete(system, user, web_search=web_search)
-        return schema.model_validate_json(completion.content), completion.annotations
+        completion = client.complete(system, user)
+        return schema.model_validate_json(completion.content)
     except (ValidationError, json.JSONDecodeError) as first_error:
         # A single repair retry keeps malformed model output from corrupting state.
         try:
-            repair = client.complete(REPAIR_SYSTEM, f"目标结构：{schema.model_json_schema()}\n原始输出：{getattr(locals().get('completion', None), 'content', '')}", web_search=False)
-            return schema.model_validate_json(repair.content), repair.annotations
+            repair = client.complete(REPAIR_SYSTEM, f"目标结构：{schema.model_json_schema()}\n原始输出：{getattr(locals().get('completion', None), 'content', '')}")
+            return schema.model_validate_json(repair.content)
         except Exception as second_error:
             raise ServiceError(f"模型返回格式不可用，请稍后重试：{second_error}", 502) from first_error
     except MiMoError as exc:
@@ -104,7 +104,7 @@ def profile_from_upload(db: Session, session: SessionRecord, direction: str, gro
         resume_text = parse_resume(filename, content, settings.max_resume_bytes)
     except ResumeParseError as exc:
         raise ServiceError(str(exc), 422) from exc
-    candidate, _ = _model_json(provider(), PROFILE_SYSTEM, PROFILE_USER.format(resume=resume_text[:50000]), CandidateProfilePayload)
+    candidate = _model_json(provider(), PROFILE_SYSTEM, PROFILE_USER.format(resume=resume_text[:50000]), CandidateProfilePayload)
     # Preserve historical runs, but make every plan tied to the previous profile
     # revision unusable and visibly expired.
     old_runs = db.scalars(select(InterviewRun).where(InterviewRun.session_id == session.id, InterviewRun.status.in_(["ready_for_interview", "interview_in_progress", "ready_for_feedback"]))).all()
@@ -134,39 +134,21 @@ def create_plan(db: Session, session: SessionRecord) -> InterviewRun:
     if session.status in {"interview_in_progress", "ready_for_feedback"}:
         raise ServiceError("当前面试尚未结束，不能覆盖正在使用的计划。", 409)
     client = provider()
-    search_enabled = settings.mimo_web_search_enabled
     try:
-        research, annotations = _model_json(client, RESEARCH_SYSTEM, RESEARCH_USER.format(direction=profile.direction, group=profile.target_group, profile=profile.candidate_profile_json), ResearchBriefPayload, web_search=search_enabled)
+        research = _model_json(client, RESEARCH_SYSTEM, RESEARCH_USER.format(direction=profile.direction, group=profile.target_group, profile=profile.candidate_profile_json), ResearchBriefPayload)
     except ServiceError:
-        if search_enabled:
-            # Search plugin failures degrade research, but must not block planning.
-            research = ResearchBriefPayload(research_status="degraded", key_conclusions=["联网资料不可用，以下内容未核验。"], uncertainty=["课题组近期方向待确认"], sources=[])
-            annotations = []
-        else:
-            raise
-    if not search_enabled:
-        # General knowledge cannot be presented as a verified source without a search.
-        research.research_status = "degraded"
-        research.uncertainty = list(dict.fromkeys([*research.uncertainty, "未启用联网检索，课题组与近期论文信息待核验。"]))
-        research.sources = []
-    elif annotations:
-        # MiMo returns web citations as message annotations. Normalize the
-        # provider-specific shape into the stable local source contract.
-        for annotation in annotations:
-            if hasattr(annotation, "model_dump"):
-                annotation = annotation.model_dump()
-            if not isinstance(annotation, dict):
-                continue
-            nested = annotation.get("source") if isinstance(annotation.get("source"), dict) else {}
-            url = annotation.get("url") or nested.get("url")
-            if not url or any(source.url == url for source in research.sources):
-                continue
-            research.sources.append(ResearchSourcePayload(title=annotation.get("title") or nested.get("title") or "MiMo web source", url=url, accessed_at=datetime.utcnow().date().isoformat(), conclusion=annotation.get("text") or annotation.get("snippet") or "由 MiMo Web Search 返回，需结合原文核验。", relation="用于定向面试规划", verified=True))
-    plan, _ = _model_json(client, PLAN_SYSTEM, PLAN_USER.format(direction=profile.direction, group=profile.target_group, research=research.model_dump_json(), profile=profile.candidate_profile_json), PlanPayload)
+        # General-knowledge research is optional context and must not block a
+        # complete interview plan when the model is temporarily unavailable.
+        research = ResearchBriefPayload(
+            research_status="degraded",
+            key_conclusions=["本轮未获取到额外研究资料，以下内容未联网核验。"],
+            uncertainty=["目标课题组近期方向待核验"],
+        )
+    research.research_status = "degraded"
+    research.uncertainty = list(dict.fromkeys([*research.uncertainty, "本轮仅使用通用知识，未进行联网检索。"]))
+    plan = _model_json(client, PLAN_SYSTEM, PLAN_USER.format(direction=profile.direction, group=profile.target_group, research=research.model_dump_json(), profile=profile.candidate_profile_json), PlanPayload)
     run = InterviewRun(id=secrets.token_urlsafe(18), session_id=session.id, status="ready_for_interview", profile_revision=session.profile_revision, plan_profile_revision=session.profile_revision, research_status=research.research_status, plan_json=plan.model_dump_json(), research_json=research.model_dump_json())
     db.add(run)
-    for source in research.sources:
-        db.add(ResearchSource(run_id=run.id, title=source.title, url=source.url, accessed_at=source.accessed_at, conclusion=source.conclusion, relation=source.relation, verified=source.verified))
     session.current_run_id = run.id
     session.status = "ready_for_interview"
     db.commit()
@@ -227,7 +209,7 @@ def answer_interview(db: Session, session: SessionRecord, answer: str, request_i
         return run, InterviewerPayload(done=True, topic="结束"), None
     plan = PlanPayload.model_validate_json(run.plan_json or "{}")
     transcript = "\n".join(f"{t.sequence}. {t.role}: {t.content}" for t in run.turns)
-    output, _ = _model_json(
+    output = _model_json(
         provider(),
         INTERVIEW_SYSTEM,
         INTERVIEW_USER.format(
@@ -283,7 +265,7 @@ def generate_feedback(db: Session, session: SessionRecord) -> FeedbackPayload:
     profile = db.get(Profile, session.id)
     transcript = "\n".join(f"第{t.sequence}轮 {t.role}：{t.content}" for t in run.turns)
     observations = "\n".join(f"第{o.turn_sequence}轮：{o.evidence}" for o in run.observations)
-    feedback, _ = _model_json(provider(), FEEDBACK_SYSTEM, FEEDBACK_USER.format(profile=profile.candidate_profile_json if profile else "{}", plan=run.plan_json, transcript=transcript, observations=observations), FeedbackPayload)
+    feedback = _model_json(provider(), FEEDBACK_SYSTEM, FEEDBACK_USER.format(profile=profile.candidate_profile_json if profile else "{}", plan=run.plan_json, transcript=transcript, observations=observations), FeedbackPayload)
     required_dimensions = ["专业基础", "项目深度", "科研思维", "方向匹配", "表达沟通"]
     for dimension in required_dimensions:
         if dimension not in feedback.ratings:
