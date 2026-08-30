@@ -1,7 +1,10 @@
 FROM node:22-alpine AS frontend-build
 WORKDIR /web
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
+# esbuild's postinstall can race with overlay filesystems on small ECS hosts
+# (ETXTBSY). Its platform package is already included by the lockfile, so skip
+# the postinstall executable check and let Vite use the bundled binary.
+RUN npm ci --ignore-scripts
 COPY frontend ./
 RUN npm run build
 
