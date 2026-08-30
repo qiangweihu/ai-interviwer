@@ -12,61 +12,6 @@ from backend.app.main import app
 
 
 class ServerWorkflowTests(unittest.TestCase):
-    def test_interviewer_style_catalog_and_run_snapshot(self):
-        with TestClient(app) as client:
-            catalog = client.get("/api/interviewer-styles")
-            self.assertEqual(catalog.status_code, 200)
-            presets = catalog.json()["presets"]
-            self.assertEqual(len(presets), 8)
-            self.assertEqual(
-                {item["preset_id"] for item in presets},
-                {
-                    "structured_examiner",
-                    "investigative_examiner",
-                    "guided_interviewer",
-                    "adaptive_guide",
-                    "patient_examiner",
-                    "deep_dive_examiner",
-                    "supportive_listener",
-                    "open_explorer",
-                },
-            )
-
-            client.post("/api/session")
-            client.post("/api/profile", data={"direction": "计算机视觉"}, files={"resume": ("cv.txt", b"facts")})
-            selected = {"control": "listener", "tone": "strict", "plan_adherence": "flexible"}
-            planned = client.post("/api/plan", json={"interviewer_style": selected})
-            self.assertEqual(planned.status_code, 200)
-            self.assertEqual(planned.json()["interviewer_style"]["preset_id"], "deep_dive_examiner")
-            self.assertEqual(client.get("/api/session").json()["interviewer_style"]["preset_id"], "deep_dive_examiner")
-
-            started = client.post("/api/interview/start")
-            self.assertEqual(started.status_code, 200)
-            self.assertIn("具体", started.json()["question"])
-            # The run is immutable once it is ready to start.
-            self.assertEqual(client.post("/api/plan", json={"interviewer_style": {"control": "dominant", "tone": "strict", "plan_adherence": "structured"}}).status_code, 409)
-
-    def test_invalid_interviewer_style_is_rejected(self):
-        with TestClient(app) as client:
-            client.post("/api/session")
-            client.post("/api/profile", data={"direction": "方向"}, files={"resume": ("cv.txt", b"facts")})
-            response = client.post("/api/plan", json={"interviewer_style": {"control": "aggressive", "tone": "friendly", "plan_adherence": "structured"}})
-            self.assertEqual(response.status_code, 422)
-
-    def test_style_preference_is_reused_for_next_round(self):
-        with TestClient(app) as client:
-            client.post("/api/session")
-            client.post("/api/profile", data={"direction": "方向"}, files={"resume": ("cv.txt", b"facts")})
-            selected = {"control": "listener", "tone": "friendly", "plan_adherence": "flexible"}
-            client.post("/api/plan", json={"interviewer_style": selected})
-            client.post("/api/interview/start")
-            client.post("/api/interview/end")
-            next_round = client.post("/api/session/new")
-            self.assertEqual(next_round.status_code, 200)
-            self.assertEqual(next_round.json()["interviewer_style"]["preset_id"], "open_explorer")
-            planned = client.post("/api/plan")
-            self.assertEqual(planned.json()["interviewer_style"]["preset_id"], "open_explorer")
-
     def test_fictional_resume_completes_a_round_and_reuses_profile(self):
         with TestClient(app) as client:
             self.assertEqual(client.post("/api/session").status_code, 200)

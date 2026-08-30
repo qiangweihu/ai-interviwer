@@ -87,14 +87,6 @@ class DemoMiMoClient(MiMoClient):
                     {"title": "收尾", "objective": "确认学习计划", "core_question": "进入课题组后，你希望如何开始第一周的学习？", "followups": [], "expected_evidence": ["行动计划"], "evaluation_dimensions": ["方向匹配"], "minutes": 2},
                 ],
             }
-        elif "第一道问题" in user:
-            if "结构化审查官" in system:
-                question = "请按结论、方法、证据三个部分说明你目标方向中的一个核心问题。"
-            elif "温和倾听官" in system or "开放探索官" in system:
-                question = "请从你最熟悉的一段经历开始，完整介绍它与你目标方向的联系。"
-            else:
-                question = "请具体说明你目标方向中的一个核心问题，以及你判断它重要的依据。"
-            payload = {"question": question, "topic": "方向基础", "done": False, "clarification": False, "observation": "", "next_action": "next_topic"}
         elif "面试官" in system:
             self.interview_count += 1
             payload = {"question": "请再举一个具体例子说明你的判断。", "topic": "动态追问", "done": False, "clarification": False, "observation": "候选人回答已记录，待继续核验具体依据。", "next_action": "follow_up"}

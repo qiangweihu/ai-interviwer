@@ -22,8 +22,6 @@
 
 仓库同时包含一个可部署的匿名 Web 版本。它把四个 skill 的规则固化为后端状态机和 MiMo 提示词模块，前端由 FastAPI 同源提供。服务器版不依赖 Codex 窗口，也不需要用户安装 Codex。上传资料后规划自动在后台完成，网页只显示“面试已准备好”，不单独展示规划页面或完整题单。
 
-面试开始前可以选择面试官风格：对话控制（主导/倾听）、沟通氛围（严格/和蔼）和流程自由度（循规/随性）三个二选一维度，共八种固定组合。风格只改变提问方式，不改变反馈评分标准；每轮配置会保存为不可变快照，下一轮默认沿用并允许重新选择。
-
 本地开发（需要 Python 3.12、Node 22）：
 
 ```bash
@@ -31,7 +29,6 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r backend/requirements.txt
 export MOCK_MIMO=true
-python3 -m alembic -c backend/alembic.ini upgrade head
 uvicorn backend.app.main:app --reload --port 8000
 ```
 
@@ -88,7 +85,7 @@ bash scripts/deploy.sh
 │   └── fictional-feedback.md
 ├── tests/test_framework.py
 ├── tests/test_server_contract.py
-├── backend/                 # FastAPI、SQLite、MiMo 适配器和面试官风格目录
+├── backend/                 # FastAPI、SQLite、MiMo 适配器
 ├── frontend/                # React/Vite 单页向导
 ├── Dockerfile
 └── docker-compose.yml

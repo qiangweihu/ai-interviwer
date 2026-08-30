@@ -13,18 +13,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .config import settings
-from .db import InterviewRun, Profile, SessionRecord, cleanup_expired, get_db, init_db, utcnow
-from .interviewer_styles import catalog, public_style
-from .schemas import (
-    AnswerRequest,
-    AnswerResponse,
-    FeedbackResponse,
-    InterviewerStyleCatalog,
-    InterviewStateResponse,
-    PlanRequest,
-    SessionResponse,
-    StartResponse,
-)
+from .db import InterviewRun, SessionRecord, cleanup_expired, get_db, init_db, utcnow
+from .schemas import AnswerRequest, AnswerResponse, FeedbackResponse, InterviewStateResponse, SessionResponse, StartResponse
 from .services import (
     ServiceError,
     answer_interview,
@@ -36,8 +26,6 @@ from .services import (
     profile_from_upload,
     start_new_round,
     start_interview,
-    style_for_session,
-    style_for_run,
 )
 
 
@@ -124,24 +112,6 @@ def _preview(run: InterviewRun | None) -> dict | None:
     }
 
 
-def _session_style(session: SessionRecord, run: InterviewRun | None = None) -> dict:
-    return public_style(style_for_run(run) if run and run.interviewer_style_json else style_for_session(session))
-
-
-def _session_response(session: SessionRecord, db: Session, run: InterviewRun | None = None) -> SessionResponse:
-    run = run if run is not None else get_current_run(db, session)
-    return SessionResponse(
-        status=session.status,
-        profile_revision=session.profile_revision,
-        plan_profile_revision=run.plan_profile_revision if run else None,
-        current_run_id=run.id if run else None,
-        expires_at=session.expires_at,
-        profile_complete=db.get(Profile, session.id) is not None,
-        plan_preview=_preview(run),
-        interviewer_style=_session_style(session, run),
-    )
-
-
 @app.exception_handler(ServiceError)
 async def handle_service_error(_request: Request, exc: ServiceError):
     return JSONResponse(status_code=exc.status_code, content={"detail": str(exc)})
@@ -152,21 +122,17 @@ def health():
     return {"status": "ok", "service": "ai-interviwer"}
 
 
-@app.get("/api/interviewer-styles", response_model=InterviewerStyleCatalog)
-def interviewer_styles():
-    return catalog()
-
-
 @app.post("/api/session", response_model=SessionResponse)
 def create_api_session(response: Response, db: Session = Depends(get_db)):
     record, token = new_session(db)
     response.set_cookie(COOKIE_NAME, token, max_age=settings.session_ttl_hours * 3600, httponly=True, samesite="lax", secure=settings.cookie_secure, path="/")
-    return _session_response(record, db)
+    return SessionResponse(status=record.status, profile_revision=record.profile_revision, expires_at=record.expires_at)
 
 
 @app.get("/api/session", response_model=SessionResponse)
 def read_api_session(session: SessionRecord = Depends(current_session), db: Session = Depends(get_db)):
-    return _session_response(session, db)
+    run = get_current_run(db, session)
+    return SessionResponse(status=session.status, profile_revision=session.profile_revision, plan_profile_revision=run.plan_profile_revision if run else None, current_run_id=run.id if run else None, expires_at=session.expires_at, profile_complete=session.profile is not None, plan_preview=_preview(run))
 
 
 @app.delete("/api/session")
@@ -183,7 +149,7 @@ def new_api_round(session: SessionRecord = Depends(current_session), db: Session
         start_new_round(db, session)
     except ServiceError as exc:
         raise _service_error(exc)
-    return _session_response(session, db)
+    return SessionResponse(status=session.status, profile_revision=session.profile_revision, expires_at=session.expires_at, profile_complete=True)
 
 
 @app.post("/api/profile", response_model=SessionResponse)
@@ -201,18 +167,19 @@ def upload_profile(
         profile_from_upload(db, session, direction, target_group, target_program, resume.filename or "resume.txt", content)
     except ServiceError as exc:
         raise _service_error(exc)
-    return _session_response(session, db)
+    run = get_current_run(db, session)
+    return SessionResponse(status=session.status, profile_revision=session.profile_revision, current_run_id=run.id if run else None, expires_at=session.expires_at, profile_complete=True)
 
 
 @app.post("/api/plan", response_model=SessionResponse)
-def build_plan(request: Request, body: PlanRequest | None = None, session: SessionRecord = Depends(current_session), db: Session = Depends(get_db)):
+def build_plan(request: Request, session: SessionRecord = Depends(current_session), db: Session = Depends(get_db)):
     if not limiter.allow(request.client.host if request.client else "unknown"):
         raise HTTPException(status_code=429, detail="请求过于频繁，请稍后再试。")
     try:
-        run = create_plan(db, session, body.interviewer_style if body else None)
+        run = create_plan(db, session)
     except ServiceError as exc:
         raise _service_error(exc)
-    return _session_response(session, db, run)
+    return SessionResponse(status=session.status, profile_revision=session.profile_revision, plan_profile_revision=run.plan_profile_revision, current_run_id=run.id, expires_at=session.expires_at, profile_complete=True, plan_preview=_preview(run))
 
 
 @app.post("/api/interview/start", response_model=StartResponse)
@@ -254,7 +221,7 @@ def finish_interview(session: SessionRecord = Depends(current_session), db: Sess
         run = end_interview(db, session)
     except ServiceError as exc:
         raise _service_error(exc)
-    return _session_response(session, db, run)
+    return SessionResponse(status=session.status, profile_revision=session.profile_revision, plan_profile_revision=run.plan_profile_revision, current_run_id=run.id, expires_at=session.expires_at, profile_complete=True)
 
 
 @app.post("/api/feedback", response_model=FeedbackResponse)

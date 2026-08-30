@@ -32,9 +32,7 @@ class ServerScaffoldContractTests(unittest.TestCase):
             "backend/app/main.py",
             "backend/app/services.py",
             "backend/app/db.py",
-            "backend/app/interviewer_styles.py",
             "backend/app/mimo.py",
-            "backend/migrations/versions/0002_interviewer_styles.py",
             "frontend/src/App.tsx",
             "Dockerfile",
             "docker-compose.yml",
@@ -43,7 +41,7 @@ class ServerScaffoldContractTests(unittest.TestCase):
         ):
             self.assertTrue((ROOT / path).exists(), path)
         main = (ROOT / "backend/app/main.py").read_text(encoding="utf-8")
-        for route in ("/api/session", "/api/profile", "/api/plan", "/api/interviewer-styles", "/api/interview/start", "/api/interview/answer", "/api/interview/end", "/api/feedback", "/health"):
+        for route in ("/api/session", "/api/profile", "/api/plan", "/api/interview/start", "/api/interview/answer", "/api/interview/end", "/api/feedback", "/health"):
             self.assertIn(route, main)
 
     def test_runtime_does_not_use_codex_skill_discovery(self):

@@ -1,6 +1,6 @@
 """Versioned prompt contracts derived from the repository skills."""
 
-PROMPT_VERSION = "1.1.0"
+PROMPT_VERSION = "1.0.0"
 
 PROFILE_SYSTEM = """你是科研面试资料整理器。只使用简历中真实出现的事实，绝不补全论文、指标、职责或技能熟练度。联系方式不要输出。返回严格 JSON，不要 Markdown。"""
 PROFILE_USER = """请把下面的脱敏简历整理为结构化候选人档案。未知信息使用‘待确认’，保留项目中的方法、结果和个人角色。
@@ -43,11 +43,6 @@ INTERVIEW_USER = """面试计划：{plan}
 刚刚的候选人回答：{answer}
 
 先依据系统中的追问开启/结束规则判断下一步，再输出 JSON：next_action（只能是 follow_up、next_topic、clarify、end_interview 之一）、question（下一道单一问题；若进入下一个主题则给该主题问题；若结束可为空字符串）、topic、done（是否应结束整场面试）、clarification（是否因术语/数字等转写歧义而先澄清）、observation（不超过两句的事实证据）。当候选人明显卡住时不要继续 follow_up；当回答已经充分时不要为了追问而追问。"""
-
-INTERVIEW_START_USER = """面试计划：{plan}
-当前主题：{topic}
-
-这是面试的第一道问题，还没有候选人回答。请保留该主题的考察目标，只根据系统中的面试官风格调整问题的控制方式和表达语气。输出严格 JSON：next_action（只能为 next_topic）、question（只含一道问题）、topic、done（必须为 false）、clarification（必须为 false）、observation（空字符串）。不要提供答案、提示、评分或额外说明。"""
 
 FEEDBACK_SYSTEM = """你是证据化科研面试反馈教练。只依据简历、计划和实际转录评价，不臆测未展示能力，不做录取判断。分别按 1–5 评价专业基础、项目深度、科研思维、方向匹配、表达沟通；每项必须给出回答轮次或简历事实证据。区分知识、推理、项目深度、方向理解、表达和疑似转写问题。返回严格 JSON。"""
 FEEDBACK_USER = """候选人档案：{profile}

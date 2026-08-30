@@ -12,14 +12,12 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .db import InterviewRun, InterviewTurn, Observation, Profile, SessionRecord, utcnow
-from .interviewer_styles import default_snapshot, snapshot_for_selection
 from .mimo import DemoMiMoClient, MiMoClient, MiMoError
 from .parsing import ResumeParseError, parse_resume
 from .prompts import (
     FEEDBACK_SYSTEM,
     FEEDBACK_USER,
     INTERVIEW_SYSTEM,
-    INTERVIEW_START_USER,
     INTERVIEW_USER,
     PLAN_SYSTEM,
     PLAN_USER,
@@ -29,7 +27,7 @@ from .prompts import (
     RESEARCH_SYSTEM,
     RESEARCH_USER,
 )
-from .schemas import FeedbackPayload, InterviewerStyleSelection, PlanPayload, ResearchBriefPayload
+from .schemas import FeedbackPayload, PlanPayload, ResearchBriefPayload
 
 
 T = TypeVar("T", bound=BaseModel)
@@ -47,51 +45,6 @@ def provider() -> MiMoClient:
 
 def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-
-
-def _style_snapshot(raw: Any | None) -> dict[str, Any]:
-    """Normalize a stored or requested style to the server-owned snapshot."""
-    if isinstance(raw, str):
-        try:
-            raw = json.loads(raw)
-        except json.JSONDecodeError:
-            raw = None
-    if not isinstance(raw, dict):
-        return default_snapshot()
-    try:
-        canonical = snapshot_for_selection(raw)
-        # Stored run/preference records may contain a prompt snapshot. Keep it
-        # when present so a later server deployment cannot silently change the
-        # behavior of an already prepared round.
-        if isinstance(raw.get("prompt_addendum"), str) and raw["prompt_addendum"].strip():
-            canonical["prompt_addendum"] = raw["prompt_addendum"]
-        if isinstance(raw.get("version"), str) and raw["version"].strip():
-            canonical["version"] = raw["version"]
-        return canonical
-    except ValueError:
-        return default_snapshot()
-
-
-def style_for_session(session: SessionRecord) -> dict[str, Any]:
-    return _style_snapshot(session.preferred_interviewer_style_json)
-
-
-def style_for_run(run: InterviewRun) -> dict[str, Any]:
-    return _style_snapshot(run.interviewer_style_json)
-
-
-def _requested_style(session: SessionRecord, selection: InterviewerStyleSelection | None) -> dict[str, Any]:
-    if selection is not None:
-        return _style_snapshot(selection.model_dump())
-    return style_for_session(session)
-
-
-def _interview_system(style: dict[str, Any]) -> str:
-    return (
-        f"{INTERVIEW_SYSTEM}\n\n"
-        f"本轮固定面试官类型：{style['name']}\n"
-        f"本轮风格行为指令：{style['prompt_addendum']}"
-    )
 
 
 def _model_json(client: MiMoClient, system: str, user: str, schema: type[T]) -> T:
@@ -174,17 +127,12 @@ def profile_from_upload(db: Session, session: SessionRecord, direction: str, gro
     return profile
 
 
-def create_plan(db: Session, session: SessionRecord, selection: InterviewerStyleSelection | None = None) -> InterviewRun:
+def create_plan(db: Session, session: SessionRecord) -> InterviewRun:
     profile = db.get(Profile, session.id)
     if not profile:
         raise ServiceError("请先提交科研方向和简历。", 409)
-    if session.status != "ready_for_planning":
-        raise ServiceError("当前阶段不能重新准备面试。请先完成当前面试或开始下一轮。", 409)
-    style = _requested_style(session, selection)
-    # Save the preference before model calls so a failed preparation can be
-    # retried without losing the user's choice.
-    session.preferred_interviewer_style_json = _json(style)
-    db.commit()
+    if session.status in {"interview_in_progress", "ready_for_feedback"}:
+        raise ServiceError("当前面试尚未结束，不能覆盖正在使用的计划。", 409)
     client = provider()
     try:
         research = _model_json(client, RESEARCH_SYSTEM, RESEARCH_USER.format(direction=profile.direction, group=profile.target_group, profile=profile.candidate_profile_json), ResearchBriefPayload)
@@ -199,7 +147,7 @@ def create_plan(db: Session, session: SessionRecord, selection: InterviewerStyle
     research.research_status = "degraded"
     research.uncertainty = list(dict.fromkeys([*research.uncertainty, "本轮仅使用通用知识，未进行联网检索。"]))
     plan = _model_json(client, PLAN_SYSTEM, PLAN_USER.format(direction=profile.direction, group=profile.target_group, research=research.model_dump_json(), profile=profile.candidate_profile_json), PlanPayload)
-    run = InterviewRun(id=secrets.token_urlsafe(18), session_id=session.id, status="ready_for_interview", profile_revision=session.profile_revision, plan_profile_revision=session.profile_revision, research_status=research.research_status, plan_json=plan.model_dump_json(), research_json=research.model_dump_json(), interviewer_style_json=_json(style))
+    run = InterviewRun(id=secrets.token_urlsafe(18), session_id=session.id, status="ready_for_interview", profile_revision=session.profile_revision, plan_profile_revision=session.profile_revision, research_status=research.research_status, plan_json=plan.model_dump_json(), research_json=research.model_dump_json())
     db.add(run)
     session.current_run_id = run.id
     session.status = "ready_for_interview"
@@ -227,27 +175,12 @@ def start_interview(db: Session, session: SessionRecord) -> tuple[InterviewRun, 
         raise ServiceError("当前没有有效的面试计划，请重新规划。", 409)
     plan = PlanPayload.model_validate_json(run.plan_json or "{}")
     first = plan.topics[0]
-    style = style_for_run(run)
-    question = first.core_question
-    try:
-        first_question = _model_json(
-            provider(),
-            _interview_system(style),
-            INTERVIEW_START_USER.format(plan=run.plan_json, topic=first.title),
-            InterviewerPayload,
-        )
-        if first_question.question.strip():
-            question = first_question.question.strip()
-    except ServiceError:
-        # A transient start-time model failure should not prevent a round from
-        # starting; the neutral plan question remains a safe fallback.
-        pass
     run.status = "interview_in_progress"
-    turn = InterviewTurn(run_id=run.id, sequence=1, role="interviewer", content=question, topic=first.title)
+    turn = InterviewTurn(run_id=run.id, sequence=1, role="interviewer", content=first.core_question, topic=first.title)
     db.add(turn)
     session.status = "interview_in_progress"
     db.commit()
-    return run, question, first.title, 1
+    return run, first.core_question, first.title, 1
 
 
 def answer_interview(db: Session, session: SessionRecord, answer: str, request_id: str) -> tuple[InterviewRun, InterviewerPayload, int | None]:
@@ -278,7 +211,7 @@ def answer_interview(db: Session, session: SessionRecord, answer: str, request_i
     transcript = "\n".join(f"{t.sequence}. {t.role}: {t.content}" for t in run.turns)
     output = _model_json(
         provider(),
-        _interview_system(style_for_run(run)),
+        INTERVIEW_SYSTEM,
         INTERVIEW_USER.format(
             plan=run.plan_json,
             transcript=transcript[-30000:],
