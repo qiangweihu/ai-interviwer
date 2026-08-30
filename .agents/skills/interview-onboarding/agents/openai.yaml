@@ -1,0 +1,7 @@
+interface:
+  display_name: "科研面试资料准备"
+  short_description: "建立科研面试全局档案"
+  default_prompt: "使用 $interview-onboarding 建立我的科研方向与脱敏简历档案。"
+
+policy:
+  allow_implicit_invocation: true

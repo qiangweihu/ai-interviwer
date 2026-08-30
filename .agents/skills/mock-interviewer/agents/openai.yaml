@@ -1,0 +1,7 @@
+interface:
+  display_name: "科研模拟面试官"
+  short_description: "进行自适应科研模拟面试"
+  default_prompt: "使用 $mock-interviewer 按我的面试计划开始模拟面试。"
+
+policy:
+  allow_implicit_invocation: true

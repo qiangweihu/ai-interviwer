@@ -30,3 +30,6 @@ __pycache__/
 # Temporary files
 tmp/
 *.tmp
+
+# User-provided resumes, research context, transcripts, and feedback are local-only.
+.interview/

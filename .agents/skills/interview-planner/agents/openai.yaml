@@ -1,0 +1,7 @@
+interface:
+  display_name: "科研面试内容规划"
+  short_description: "生成定向科研面试计划"
+  default_prompt: "使用 $interview-planner 为我的研究方向和简历规划一次科研面试。"
+
+policy:
+  allow_implicit_invocation: true
