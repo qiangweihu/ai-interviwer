@@ -1,0 +1,15 @@
+.git
+.gitignore
+.interview
+.env
+.env.*
+!.env.example
+node_modules
+frontend/dist
+backend/__pycache__
+__pycache__
+*.pyc
+2026-08-30_项目挑战说明.pdf
+README.md
+AGENTS.md
+**/tests

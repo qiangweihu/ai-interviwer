@@ -53,3 +53,11 @@
 ## 默认语言与交互
 
 默认使用简体中文，跟随用户主动使用的语言。除非用户要求，否则不构建独立 Web 服务、不调用外部模型 API、不保存音频；本阶段的价值来自可复用的 skills、结构化证据和连续练习。
+
+## 服务器运行时
+
+仓库同时包含 `backend/` 和 `frontend/` 的服务器版实现。服务器运行时把本文件和四个 skills 当作产品规则来源，但不依赖 Codex skill 自动发现；用户资料必须写入服务器 SQLite 数据卷，不得写入 Git 跟踪文件。
+
+- 本地开发可使用 `MOCK_MIMO=true` 跑虚构数据；生产只通过环境变量提供 `MIMO_API_KEY`。
+- 默认部署为 Docker Compose 单容器，监听 8000；服务器代码位于 `/opt/ai-interviwer`，运行数据位于 `/var/lib/ai-interviwer`。
+- 正式更新先在本地测试并推送 GitHub，再通过 `scripts/deploy.sh` SSH 发布；不要在服务器工作副本直接编辑业务代码。

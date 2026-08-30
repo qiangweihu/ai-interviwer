@@ -1,0 +1,27 @@
+:root { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #182230; background: #f5f7fb; font-synthesis: none; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; }
+button, input, textarea { font: inherit; }
+button { border: 0; border-radius: 12px; padding: 13px 20px; color: white; background: #2457d6; cursor: pointer; font-weight: 700; }
+button:disabled { opacity: .55; cursor: wait; }
+button.ghost { color: #2457d6; background: #e9efff; padding: 10px 14px; }
+.shell { width: min(960px, calc(100% - 32px)); margin: 0 auto; padding: 42px 0 28px; }
+header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 32px; }
+h1 { margin: 4px 0 10px; letter-spacing: -.04em; font-size: clamp(32px, 6vw, 58px); }
+h2 { margin: 0 0 10px; font-size: 28px; }
+h3 { margin: 28px 0 12px; }
+.eyebrow { color: #5470a7; font-size: 11px; letter-spacing: .18em; font-weight: 800; margin: 0; }
+.lead { color: #607086; font-size: 17px; margin: 0; }
+.privacy { color: #5470a7; background: #e9efff; border-radius: 999px; padding: 9px 13px; font-size: 12px; white-space: nowrap; }
+.steps { display: flex; gap: 10px; margin-bottom: 24px; overflow: auto; }
+.steps span { display: flex; align-items: center; gap: 7px; color: #9aa5b5; font-size: 13px; white-space: nowrap; }
+.steps b { display: inline-grid; place-items: center; width: 25px; height: 25px; border-radius: 50%; background: #e4e8ef; font-size: 12px; }
+.steps .active { color: #2457d6; font-weight: 700; }.steps .active b { color: white; background: #2457d6; }
+.card { background: white; border: 1px solid #e2e7ef; box-shadow: 0 14px 40px rgba(37, 58, 90, .06); border-radius: 22px; padding: clamp(22px, 5vw, 44px); }
+.muted { color: #68778c; line-height: 1.7; }.notice, .error { border-radius: 12px; padding: 13px 15px; margin: 20px 0; line-height: 1.6; }.notice { color: #705b20; background: #fff8dc; }.error { color: #a33a3a; background: #fff0f0; border: 1px solid #ffd3d3; }
+.form { display: grid; gap: 18px; margin-top: 24px; max-width: 640px; }.form label { display: grid; gap: 8px; color: #3c4a60; font-weight: 700; font-size: 14px; }.form input, textarea { border: 1px solid #ccd4e0; border-radius: 11px; padding: 13px 14px; background: #fbfcfe; color: #182230; outline: none; }.form input:focus, textarea:focus { border-color: #5177d9; box-shadow: 0 0 0 3px #e5ecff; }.upload { border: 1px dashed #aebbd0; border-radius: 12px; padding: 14px; }.upload input { border: 0; padding: 0; }.upload small { color: #6d7a8e; font-weight: 400; }
+.topic-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: 24px 0; }.topic-grid article, .ratings article { border: 1px solid #e3e8f0; border-radius: 14px; padding: 15px; display: grid; gap: 7px; }.topic-grid span, .ratings small { color: #69778b; font-size: 13px; line-height: 1.5; }.topic-grid small { color: #5470a7; }
+.interview-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }.actions, .answer-actions { display: flex; gap: 8px; }.question { margin: 24px 0; padding: 22px; border-radius: 16px; background: #eef3ff; color: #1f3f8f; font-size: 21px; line-height: 1.55; font-weight: 650; }.history { display: grid; gap: 10px; max-height: 250px; overflow: auto; margin-bottom: 18px; }.history div { display: flex; gap: 12px; font-size: 14px; line-height: 1.6; }.history b { min-width: 40px; color: #5470a7; }.history .candidate b { color: #31825f; }.answer { display: grid; gap: 12px; }.answer textarea { resize: vertical; }
+.ratings { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }.score { color: #2457d6; font-size: 20px; font-weight: 800; }.ratings small, .issue small { color: #69778b; line-height: 1.5; }.issue { border-left: 3px solid #e9aa4c; padding: 12px 16px; margin: 10px 0; background: #fffaf1; }.issue p { margin: 6px 0; line-height: 1.6; }li { margin: 8px 0; line-height: 1.6; }
+footer { color: #8995a6; text-align: center; font-size: 12px; margin: 24px 0; } @media (max-width: 640px) { header { display: grid; }.privacy { justify-self: start; }.shell { padding-top: 24px; }.card { border-radius: 16px; } }
+@media print { body { background: white; }.shell { width: 100%; }.steps, .privacy, button, footer, .interview-head .ghost { display: none !important; }.card { box-shadow: none; border: 0; padding: 0; } }

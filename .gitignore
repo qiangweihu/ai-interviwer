@@ -21,6 +21,7 @@ coverage/
 .cache/
 __pycache__/
 *.py[cod]
+*.tsbuildinfo
 
 # Editors and operating systems
 .DS_Store
@@ -33,3 +34,8 @@ tmp/
 
 # User-provided resumes, research context, transcripts, and feedback are local-only.
 .interview/
+
+# Server runtime data
+data/
+*.db
+backups/

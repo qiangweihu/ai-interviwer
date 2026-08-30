@@ -1,0 +1,16 @@
+services:
+  app:
+    build: .
+    image: ai-interviwer:latest
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      APP_ENV: production
+      DATA_DIR: /var/lib/ai-interviwer
+    ports:
+      - "8000:8000"
+    volumes:
+      - /var/lib/ai-interviwer:/var/lib/ai-interviwer
+    init: true
