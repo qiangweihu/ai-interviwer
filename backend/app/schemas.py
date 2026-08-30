@@ -24,6 +24,34 @@ class SessionResponse(BaseModel):
     expires_at: datetime
     profile_complete: bool = False
     plan_preview: dict[str, Any] | None = None
+    interviewer_style: "InterviewerStylePublic | None" = None
+
+
+class InterviewerStyleSelection(BaseModel):
+    """The three controlled choices exposed by the client."""
+
+    control: Literal["dominant", "listener"] = "dominant"
+    tone: Literal["strict", "friendly"] = "friendly"
+    plan_adherence: Literal["structured", "flexible"] = "structured"
+
+
+class InterviewerStylePublic(InterviewerStyleSelection):
+    version: str
+    preset_id: str
+    name: str
+    summary: str
+    traits: list[str] = Field(default_factory=list)
+
+
+class InterviewerStyleCatalog(BaseModel):
+    version: str
+    default_preset_id: str
+    dimensions: dict[str, Any]
+    presets: list[InterviewerStylePublic]
+
+
+class PlanRequest(BaseModel):
+    interviewer_style: InterviewerStyleSelection | None = None
 
 
 class PlanTopic(BaseModel):

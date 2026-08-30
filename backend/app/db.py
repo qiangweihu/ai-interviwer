@@ -25,6 +25,9 @@ class SessionRecord(Base):
     status: Mapped[str] = mapped_column(String(32), default="needs_onboarding", index=True)
     profile_revision: Mapped[int] = mapped_column(Integer, default=0)
     current_run_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # The latest user choice is a draft preference used when preparing the
+    # next round.  The immutable per-run snapshot lives on InterviewRun.
+    preferred_interviewer_style_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
     expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
@@ -59,6 +62,8 @@ class InterviewRun(Base):
     plan_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     research_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     feedback_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Full versioned style snapshot, including the server-owned prompt block.
+    interviewer_style_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
