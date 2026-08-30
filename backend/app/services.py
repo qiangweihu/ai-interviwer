@@ -4,7 +4,7 @@ import hashlib
 import json
 import secrets
 from datetime import datetime, timedelta
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import select
@@ -79,6 +79,7 @@ class InterviewerPayload(BaseModel):
     done: bool = False
     clarification: bool = False
     observation: str = ""
+    next_action: Literal["follow_up", "next_topic", "clarify", "end_interview"] = "next_topic"
 
 
 def new_session(db: Session) -> tuple[SessionRecord, str]:
@@ -210,6 +211,12 @@ def answer_interview(db: Session, session: SessionRecord, answer: str, request_i
         payload = InterviewerPayload(question=next_turn.content if next_turn else "", topic=next_turn.topic or "" if next_turn else "", done=next_turn is None)
         return run, payload, next_turn.sequence if next_turn else None
     max_seq = max((t.sequence for t in run.turns), default=0)
+    current_question = next((turn for turn in reversed(run.turns) if turn.role == "interviewer"), None)
+    current_topic = current_question.topic if current_question else ""
+    topic_question_count = sum(
+        1 for turn in run.turns if turn.role == "interviewer" and turn.topic == current_topic
+    )
+    followup_depth = max(0, topic_question_count - 1)
     db.add(InterviewTurn(run_id=run.id, sequence=max_seq + 1, role="candidate", content=answer, request_id=request_id))
     db.flush()
     if answer.strip() in {"结束面试", "结束本轮", "结束"}:
@@ -220,9 +227,24 @@ def answer_interview(db: Session, session: SessionRecord, answer: str, request_i
         return run, InterviewerPayload(done=True, topic="结束"), None
     plan = PlanPayload.model_validate_json(run.plan_json or "{}")
     transcript = "\n".join(f"{t.sequence}. {t.role}: {t.content}" for t in run.turns)
-    output, _ = _model_json(provider(), INTERVIEW_SYSTEM, INTERVIEW_USER.format(plan=run.plan_json, transcript=transcript[-30000:], answer=answer), InterviewerPayload)
+    output, _ = _model_json(
+        provider(),
+        INTERVIEW_SYSTEM,
+        INTERVIEW_USER.format(
+            plan=run.plan_json,
+            transcript=transcript[-30000:],
+            answer=answer,
+            current_topic=current_topic,
+            followup_depth=followup_depth,
+        ),
+        InterviewerPayload,
+    )
     if answer.strip() in {"跳过", "跳过本题"}:
         output.observation = "候选人主动跳过本题；该轮不作为能力证据。"
+    if output.next_action == "clarify":
+        output.clarification = True
+    if output.next_action == "end_interview":
+        output.done = True
     interviewer_count = len(db.scalars(select(InterviewTurn).where(InterviewTurn.run_id == run.id, InterviewTurn.role == "interviewer")).all())
     output.done = output.done or interviewer_count >= plan.main_question_count
     if output.done or not output.question.strip():

@@ -99,7 +99,7 @@ class DemoMiMoClient(MiMoClient):
             }
         elif "面试官" in system:
             self.interview_count += 1
-            payload = {"question": "请再举一个具体例子说明你的判断。", "topic": "动态追问", "done": False, "clarification": False, "observation": "候选人回答已记录，待继续核验具体依据。"}
+            payload = {"question": "请再举一个具体例子说明你的判断。", "topic": "动态追问", "done": False, "clarification": False, "observation": "候选人回答已记录，待继续核验具体依据。", "next_action": "follow_up"}
         elif "反馈教练" in system:
             dims = ["专业基础", "项目深度", "科研思维", "方向匹配", "表达沟通"]
             payload = {
