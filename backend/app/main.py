@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -14,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from .asr import ACCEPTED_AUDIO_TYPES, SpeechToTextError, is_enabled as speech_enabled, provider as speech_provider
 from .config import settings
+from .runner import runner_client
 from .db import InterviewRun, SessionRecord, cleanup_expired, get_db, init_db, utcnow
 from .interviewer_styles import catalog, public_style
 from .schemas import (
@@ -23,6 +25,9 @@ from .schemas import (
     InterviewerStyleCatalog,
     InterviewStateResponse,
     PlanRequest,
+    PracticalRunRequest,
+    PracticalRunResponse,
+    PracticalSubmitResponse,
     SessionResponse,
     StartResponse,
     SpeechConfigResponse,
@@ -41,6 +46,10 @@ from .services import (
     start_interview,
     style_for_run,
     style_for_session,
+    task_for_turn,
+    task_for_index,
+    run_practical_task,
+    submit_practical_task,
 )
 
 
@@ -120,9 +129,9 @@ def _preview(run: InterviewRun | None) -> dict | None:
 
     plan = json.loads(run.plan_json)
     return {
-        "duration_minutes": plan.get("duration_minutes", 25),
-        "main_question_count": plan.get("main_question_count", 10),
-        "topics": [{"title": item.get("title"), "objective": item.get("objective"), "minutes": item.get("minutes")} for item in plan.get("topics", [])],
+        "duration_minutes": plan.get("duration_minutes", 35),
+        "main_question_count": plan.get("main_question_count", 8),
+        "topics": [{"title": item.get("title"), "objective": item.get("objective"), "minutes": item.get("minutes"), "type": item.get("type", "oral")} for item in plan.get("topics", [])],
         "research_status": run.research_status,
     }
 
@@ -148,8 +157,11 @@ async def handle_service_error(_request: Request, exc: ServiceError):
 
 
 @app.get("/health")
-def health():
-    return {"status": "ok", "service": "ai-interviwer"}
+def health(response: Response):
+    runner_ok = runner_client.health() if settings.practical_runner_enabled else False
+    if settings.practical_runner_enabled and not runner_ok:
+        response.status_code = 503
+    return {"status": "ok" if (runner_ok or not settings.practical_runner_enabled) else "degraded", "service": "ai-interviwer", "practical_runner": "ok" if runner_ok else ("disabled" if not settings.practical_runner_enabled else "unavailable")}
 
 
 @app.get("/api/interviewer-styles", response_model=InterviewerStyleCatalog)
@@ -223,7 +235,8 @@ def begin_interview(request: Request, session: SessionRecord = Depends(current_s
         _run, question, topic, sequence = start_interview(db, session)
     except ServiceError as exc:
         raise _service_error(exc)
-    return StartResponse(status=session.status, question=question, topic=topic, turn_sequence=sequence)
+    run = get_current_run(db, session)
+    return StartResponse(status=session.status, question=question, topic=topic, turn_sequence=sequence, task=task_for_index(run, 0) if run else None)
 
 
 @app.get("/api/interview", response_model=InterviewStateResponse)
@@ -231,10 +244,34 @@ def read_interview_state(session: SessionRecord = Depends(current_session), db: 
     run = get_current_run(db, session)
     if not run:
         raise HTTPException(status_code=404, detail="当前没有面试记录。")
-    turns = [{"sequence": turn.sequence, "role": turn.role, "content": turn.content} for turn in run.turns if turn.role in {"interviewer", "candidate"}]
+    turns = []
+    for turn in run.turns:
+        if turn.role not in {"interviewer", "candidate"}:
+            continue
+        item = {"sequence": turn.sequence, "role": turn.role, "content": turn.content, "turn_kind": turn.turn_kind, "task_id": turn.task_id}
+        if turn.metadata_json:
+            try:
+                metadata = json.loads(turn.metadata_json)
+            except (TypeError, json.JSONDecodeError):
+                metadata = None
+            if isinstance(metadata, dict):
+                item["metadata"] = metadata
+                submission_id = metadata.get("submission_id")
+                submission = next((candidate for candidate in run.practical_submissions if candidate.id == submission_id and candidate.is_final), None)
+                if submission:
+                    try:
+                        result = json.loads(submission.result_json)
+                    except (TypeError, json.JSONDecodeError):
+                        result = {}
+                    item["submission"] = {
+                        "source": submission.source,
+                        "language": submission.language,
+                        "result": {key: result.get(key) for key in ("status", "passed", "total")},
+                    }
+        turns.append(item)
     latest = next((turn for turn in reversed(run.turns) if turn.role == "interviewer"), None)
     question = latest.content if run.status == "interview_in_progress" and latest else None
-    return InterviewStateResponse(status=run.status, question=question, topic=latest.topic if question and latest else None, turn_sequence=latest.sequence if question and latest else None, turns=turns)
+    return InterviewStateResponse(status=run.status, question=question, topic=latest.topic if question and latest else None, turn_sequence=latest.sequence if question and latest else None, turns=turns, task=task_for_turn(run, latest) if question and latest else None)
 
 
 @app.post("/api/interview/answer", response_model=AnswerResponse)
@@ -245,7 +282,53 @@ def submit_answer(request: Request, body: AnswerRequest, session: SessionRecord 
         _run, output, sequence = answer_interview(db, session, body.answer, body.request_id)
     except ServiceError as exc:
         raise _service_error(exc)
-    return AnswerResponse(status=session.status, question=output.question or None, topic=output.topic or None, turn_sequence=sequence, done=output.done, clarification=output.clarification)
+    run = get_current_run(db, session)
+    return AnswerResponse(status=session.status, question=output.question or None, topic=output.topic or None, turn_sequence=sequence, done=output.done, clarification=output.clarification, task=task_for_index(run, output.topic_index) if run else None)
+
+
+@app.post("/api/interview/tasks/{task_id}/run", response_model=PracticalRunResponse)
+def run_practical_endpoint(
+    request: Request,
+    task_id: str,
+    body: PracticalRunRequest,
+    session: SessionRecord = Depends(current_session),
+    db: Session = Depends(get_db),
+):
+    if not limiter.allow(request.client.host if request.client else "unknown"):
+        raise HTTPException(status_code=429, detail="请求过于频繁，请稍后再试。")
+    try:
+        result = run_practical_task(db, session, task_id, body.effective_source(), body.language, body.request_id)
+    except ServiceError as exc:
+        raise _service_error(exc)
+    return PracticalRunResponse(task_id=task_id, **result.as_dict())
+
+
+@app.post("/api/interview/tasks/{task_id}/submit", response_model=PracticalSubmitResponse)
+def submit_practical_endpoint(
+    request: Request,
+    task_id: str,
+    body: PracticalRunRequest,
+    session: SessionRecord = Depends(current_session),
+    db: Session = Depends(get_db),
+):
+    if not limiter.allow(request.client.host if request.client else "unknown"):
+        raise HTTPException(status_code=429, detail="请求过于频繁，请稍后再试。")
+    try:
+        run, result, output, sequence = submit_practical_task(db, session, task_id, body.effective_source(), body.language, body.explanation, body.request_id)
+    except ServiceError as exc:
+        raise _service_error(exc)
+    return PracticalSubmitResponse(
+        status=session.status,
+        task_id=task_id,
+        locked=True,
+        result=PracticalRunResponse(task_id=task_id, **result.as_dict()),
+        question=output.question or None,
+        topic=output.topic or None,
+        turn_sequence=sequence,
+        done=output.done,
+        clarification=output.clarification,
+        task=task_for_index(run, output.topic_index) if run else None,
+    )
 
 
 @app.get("/api/speech/config", response_model=SpeechConfigResponse)

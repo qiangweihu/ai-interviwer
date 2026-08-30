@@ -10,8 +10,40 @@ services:
       APP_ENV: production
       DATA_DIR: /var/lib/ai-interviwer
       LOCAL_ASR_MODEL_DIR: /var/lib/ai-interviwer/models
+      PRACTICAL_RUNNER_ENABLED: ${PRACTICAL_RUNNER_ENABLED:-false}
+      PRACTICAL_RUNNER_URL: http://runner:8080
+      PRACTICAL_RUNNER_TOKEN: ${PRACTICAL_RUNNER_TOKEN:-}
     ports:
       - "8000:8000"
     volumes:
       - /var/lib/ai-interviwer:/var/lib/ai-interviwer
     init: true
+    depends_on:
+      runner:
+        # Let the app start even when Docker is temporarily unavailable; its
+        # health endpoint and planning guard then expose a clear 503 instead of
+        # making the whole web service unreachable.
+        condition: service_started
+
+  runner:
+    build:
+      context: .
+      dockerfile: runner.Dockerfile
+    image: ai-interviwer-runner:latest
+    restart: unless-stopped
+    environment:
+      RUNNER_USE_DOCKER: "true"
+      RUNNER_IMAGE: ai-interviwer-runner:latest
+      RUNNER_WORKER_PATH: /opt/backend/runner_worker.py
+      RUNNER_MAX_CONCURRENCY: ${RUNNER_MAX_CONCURRENCY:-2}
+      PRACTICAL_RUNNER_TOKEN: ${PRACTICAL_RUNNER_TOKEN:-}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3

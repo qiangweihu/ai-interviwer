@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Generator
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, create_engine, event, select
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine, event, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
 from .config import settings
@@ -71,6 +71,7 @@ class InterviewRun(Base):
     sources: Mapped[list["ResearchSource"]] = relationship(back_populates="run", cascade="all, delete-orphan")
     turns: Mapped[list["InterviewTurn"]] = relationship(back_populates="run", cascade="all, delete-orphan", order_by="InterviewTurn.sequence")
     observations: Mapped[list["Observation"]] = relationship(back_populates="run", cascade="all, delete-orphan")
+    practical_submissions: Mapped[list["PracticalSubmission"]] = relationship(back_populates="run", cascade="all, delete-orphan", order_by="PracticalSubmission.created_at")
 
 
 class ResearchSource(Base):
@@ -105,10 +106,40 @@ class InterviewTurn(Base):
     content: Mapped[str] = mapped_column(Text)
     topic: Mapped[str | None] = mapped_column(Text, nullable=True)
     plan_topic_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    turn_kind: Mapped[str] = mapped_column(String(32), default="oral")
+    task_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     request_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     run: Mapped[InterviewRun] = relationship(back_populates="turns")
+
+
+class PracticalSubmission(Base):
+    """The immutable final artifact and machine evidence for a practical task.
+
+    Public trial runs are intentionally not stored as source code.  Only the
+    final submission is retained for feedback and later review.
+    """
+
+    __tablename__ = "practical_submissions"
+    __table_args__ = (UniqueConstraint("run_id", "request_id", name="uq_practical_submission_run_request"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("interview_runs.id", ondelete="CASCADE"), index=True)
+    task_id: Mapped[str] = mapped_column(String(128), index=True)
+    turn_sequence: Mapped[int] = mapped_column(Integer)
+    task_type: Mapped[str] = mapped_column(String(32))
+    language: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    source: Mapped[str] = mapped_column(Text)
+    explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    result_json: Mapped[str] = mapped_column(Text)
+    is_final: Mapped[bool] = mapped_column(Boolean, default=True)
+    locked: Mapped[bool] = mapped_column(Boolean, default=True)
+    request_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    run: Mapped[InterviewRun] = relationship(back_populates="practical_submissions")
 
 
 class Observation(Base):

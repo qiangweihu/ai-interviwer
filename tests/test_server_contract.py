@@ -55,16 +55,21 @@ class ServerScaffoldContractTests(unittest.TestCase):
             "backend/app/db.py",
             "backend/app/interviewer_styles.py",
             "backend/app/mimo.py",
+            "backend/app/runner.py",
+            "backend/runner_service.py",
+            "backend/runner_worker.py",
             "backend/migrations/versions/0002_interviewer_styles.py",
+            "backend/migrations/versions/0003_practical_tasks.py",
             "frontend/src/App.tsx",
             "Dockerfile",
             "docker-compose.yml",
+            "runner.Dockerfile",
             ".env.example",
             "scripts/deploy.sh",
         ):
             self.assertTrue((ROOT / path).exists(), path)
         main = (ROOT / "backend/app/main.py").read_text(encoding="utf-8")
-        for route in ("/api/session", "/api/profile", "/api/plan", "/api/interviewer-styles", "/api/interview/start", "/api/interview/answer", "/api/interview/transcribe", "/api/interview/end", "/api/feedback", "/health"):
+        for route in ("/api/session", "/api/profile", "/api/plan", "/api/interviewer-styles", "/api/interview/start", "/api/interview/answer", "/api/interview/tasks/{task_id}/run", "/api/interview/tasks/{task_id}/submit", "/api/interview/transcribe", "/api/interview/end", "/api/feedback", "/health"):
             self.assertIn(route, main)
 
     def test_audio_is_streamed_in_memory_and_not_persisted(self):
