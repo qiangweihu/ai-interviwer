@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, Literal
@@ -113,6 +114,36 @@ class PublicSample(BaseModel):
         return self
 
 
+def _coerce_string_list(value: Any) -> Any:
+    """Accept the common model shorthand ``"one item"`` for a string list.
+
+    Planning models occasionally emit one string where the JSON contract asks
+    for an array of strings. Normalize that shape before Pydantic validates the
+    task, while preserving non-string values so normal validation still reports
+    genuinely malformed data.
+    """
+
+    if value is None:
+        return []
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        # A model may have serialized an array as a JSON string. Prefer that
+        # interpretation when it is unambiguous.
+        try:
+            decoded = json.loads(text)
+        except json.JSONDecodeError:
+            decoded = None
+        if isinstance(decoded, list):
+            return decoded
+        parts = [part.strip(" \t\r\n-•") for part in re.split(r"[\n,，、;；]+", text)]
+        return [part for part in parts if part]
+    if isinstance(value, (tuple, set)):
+        return list(value)
+    return value
+
+
 class PlanTopic(BaseModel):
     """A backwards-compatible oral topic or a structured practical task."""
 
@@ -139,6 +170,17 @@ class PlanTopic(BaseModel):
     reference_solution: str = Field(default="", max_length=65536)
     reference_language: Language | None = None
     rubric: list[str] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_list_shorthand(cls, value: Any):
+        if not isinstance(value, Mapping):
+            return value
+        normalized = dict(value)
+        for field in ("followups", "expected_evidence", "evaluation_dimensions", "constraints", "language_options", "rubric"):
+            if field in normalized:
+                normalized[field] = _coerce_string_list(normalized[field])
+        return normalized
 
     @model_validator(mode="after")
     def normalize_task(self):

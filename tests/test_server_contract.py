@@ -3,7 +3,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from backend.app.schemas import FeedbackPayload, PlanPayload, ResearchBriefPayload
+from backend.app.schemas import FeedbackPayload, PlanPayload, PlanTopic, ResearchBriefPayload
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,6 +47,25 @@ class ServerScaffoldContractTests(unittest.TestCase):
         plan = PlanPayload.model_validate({"duration_minutes": 25, "main_question_count": 7, "topics": topics})
         self.assertEqual(len(plan.topics), 8)
         self.assertEqual(plan.main_question_count, 8)
+
+    def test_model_string_shorthands_are_normalized_to_task_lists(self):
+        topic = PlanTopic.model_validate(
+            {
+                "title": "模型输出兼容性",
+                "objective": "验证计划字段形状",
+                "core_question": "请说明你的判断。",
+                "expected_evidence": "能给出具体证据，说明边界",
+                "evaluation_dimensions": "专业知识与基础",
+                "constraints": "只能使用只读查询",
+                "rubric": "结果正确，解释清晰",
+                "type": "practical",
+                "practical_type": "experiment_analysis",
+            }
+        )
+        self.assertEqual(topic.expected_evidence, ["能给出具体证据", "说明边界"])
+        self.assertEqual(topic.evaluation_dimensions, ["专业知识与基础"])
+        self.assertEqual(topic.constraints, ["只能使用只读查询"])
+        self.assertEqual(topic.rubric, ["结果正确", "解释清晰"])
 
     def test_server_files_and_api_contract_are_present(self):
         for path in (
