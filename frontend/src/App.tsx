@@ -47,12 +47,35 @@ type Session = {
     duration_minutes: number;
     main_question_count: number;
     research_status?: string;
-    topics: { title: string; objective: string; minutes: number }[];
+    topics: { title: string; objective: string; minutes: number; type?: string }[];
   };
   interviewer_style?: PublicStyle;
 };
 
-type Turn = { role: "interviewer" | "candidate"; content: string };
+type Task = {
+  id: string;
+  type: "oral" | "coding" | "code_review" | "practical";
+  practical_type?: "sql" | "experiment_analysis";
+  title: string;
+  objective: string;
+  core_question: string;
+  minutes: number;
+  constraints?: string[];
+  language_options: string[];
+  starter_code?: string;
+  materials?: Record<string, unknown>;
+  public_samples?: { input: string; output: string; explanation?: string; rows?: unknown[][] }[];
+  locked?: boolean;
+  submission?: { language?: string; locked: boolean; result?: { status?: string; passed?: number; total?: number; compile_error?: string; runtime_error?: string; output_truncated?: boolean; execution_ms?: number } };
+};
+
+type Turn = {
+  role: "interviewer" | "candidate";
+  content: string;
+  turn_kind?: string;
+  task_id?: string;
+  submission?: { source?: string; language?: string; result?: { passed?: number; total?: number; status?: string } };
+};
 
 type Feedback = {
   feedback_version: "2";
@@ -181,8 +204,17 @@ function App() {
   const [resume, setResume] = useState<File | null>(null);
   const [question, setQuestion] = useState("");
   const [topic, setTopic] = useState("");
+  const [task, setTask] = useState<Task | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [answer, setAnswer] = useState("");
+  const [taskSource, setTaskSource] = useState("");
+  const [taskExplanation, setTaskExplanation] = useState("");
+  const [analysisJudgment, setAnalysisJudgment] = useState("");
+  const [analysisEvidence, setAnalysisEvidence] = useState("");
+  const [analysisNextValidation, setAnalysisNextValidation] = useState("");
+  const [taskLanguage, setTaskLanguage] = useState("python");
+  const [taskResult, setTaskResult] = useState<{ status?: string; passed?: number; total?: number; compile_error?: string; runtime_error?: string; output_truncated?: boolean } | null>(null);
+  const [taskSeconds, setTaskSeconds] = useState(0);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [paused, setPaused] = useState(false);
 
@@ -198,6 +230,95 @@ function App() {
       setBusy(false);
     }
   };
+
+  const taskKey = task ? `${task.id}:${task.type}` : "";
+  const draftKey = (id: string) => `interview-draft:${session?.current_run_id || "current"}:${id}`;
+  const isAnalysisTask = task?.type === "practical" && task.practical_type === "experiment_analysis";
+  useEffect(() => {
+    if (!task || task.type === "oral") return;
+    const seconds = Math.max(1, (task.minutes || 8) * 60);
+    setTaskSeconds(seconds);
+    const savedDraft = window.localStorage.getItem(draftKey(task.id));
+    if (task.type === "practical" && task.practical_type === "experiment_analysis") {
+      try {
+        const saved = savedDraft ? JSON.parse(savedDraft) : {};
+        setAnalysisJudgment(typeof saved.judgment === "string" ? saved.judgment : "");
+        setAnalysisEvidence(typeof saved.evidence === "string" ? saved.evidence : "");
+        setAnalysisNextValidation(typeof saved.next_validation === "string" ? saved.next_validation : "");
+        setTaskExplanation(typeof saved.explanation === "string" ? saved.explanation : "");
+      } catch {
+        setAnalysisJudgment("");
+        setAnalysisEvidence("");
+        setAnalysisNextValidation("");
+        setTaskExplanation("");
+      }
+      setTaskSource("");
+    } else {
+      let source = savedDraft ?? (task.starter_code || "");
+      let explanation = "";
+      if (savedDraft) {
+        try {
+          const saved = JSON.parse(savedDraft);
+          if (saved && typeof saved === "object") {
+            if (typeof saved.source === "string") source = saved.source;
+            if (typeof saved.explanation === "string") explanation = saved.explanation;
+          }
+        } catch {
+          // Keep compatibility with the previous plain-source draft format.
+        }
+      }
+      setTaskSource(source);
+      setAnalysisJudgment("");
+      setAnalysisEvidence("");
+      setAnalysisNextValidation("");
+      setTaskExplanation(explanation);
+    }
+    setTaskResult(task.submission?.result || null);
+    setTaskLanguage(task.language_options?.[0] || (task.type === "practical" && task.practical_type === "experiment_analysis" ? "text" : "python"));
+  }, [taskKey]);
+
+  useEffect(() => {
+    if (!task || task.type === "oral") return;
+    const draft = isAnalysisTask
+      ? JSON.stringify({ judgment: analysisJudgment, evidence: analysisEvidence, next_validation: analysisNextValidation, explanation: taskExplanation })
+      : JSON.stringify({ source: taskSource, explanation: taskExplanation });
+    window.localStorage.setItem(draftKey(task.id), draft);
+  }, [task, taskSource, isAnalysisTask, analysisJudgment, analysisEvidence, analysisNextValidation]);
+
+  useEffect(() => {
+    if (!task || task.type === "oral" || paused || taskSeconds <= 0) return;
+    const timer = window.setInterval(() => setTaskSeconds((value) => Math.max(0, value - 1)), 1000);
+    return () => window.clearInterval(timer);
+  }, [task, paused, taskSeconds > 0]);
+
+  const formatSeconds = (value: number) => `${Math.floor(value / 60).toString().padStart(2, "0")}:${(value % 60).toString().padStart(2, "0")}`;
+
+  const practicalPayload = () => {
+    if (isAnalysisTask) {
+      return {
+        source: "",
+        analysis: {
+          judgment: analysisJudgment.trim(),
+          evidence: analysisEvidence.trim(),
+          next_validation: analysisNextValidation.trim(),
+        },
+        explanation: taskExplanation.trim(),
+      };
+    }
+    return { source: taskSource.trim(), explanation: taskExplanation.trim() };
+  };
+
+  const practicalReady = isAnalysisTask
+    ? Boolean(analysisJudgment.trim() && analysisEvidence.trim() && analysisNextValidation.trim())
+    : task?.type === "code_review"
+      ? Boolean(taskSource.trim() || taskExplanation.trim())
+      : Boolean(taskSource.trim());
+
+  // A code-review explanation can be submitted without a patch, but public
+  // execution only makes sense when a replacement source is present.
+  const practicalCanRun = Boolean(
+    practicalReady && (!task || task.type !== "code_review" || taskSource.trim())
+  );
 
   // Planning is an internal preparation step. The style is submitted with
   // the plan request, then the server locks its snapshot for this run.
@@ -239,10 +360,11 @@ function App() {
 
     try {
       if (current.status === "interview_in_progress") {
-        const state = await api<{ question?: string; topic?: string; turns: Turn[] }>("/api/interview");
+        const state = await api<{ question?: string; topic?: string; turns: Turn[]; task?: Task }>("/api/interview");
         setQuestion(state.question || "");
         setTopic(state.topic || "");
         setTurns(state.turns || []);
+        setTask(state.task || null);
       }
       if (current.status === "complete" && current.current_run_id) {
         const result = await api<{ feedback: Feedback }>("/api/feedback");
@@ -282,9 +404,10 @@ function App() {
   };
 
   const start = () => void run(async () => {
-    const result = await api<{ question: string; topic?: string }>("/api/interview/start", { method: "POST" });
+    const result = await api<{ question: string; topic?: string; task?: Task }>("/api/interview/start", { method: "POST" });
     setQuestion(result.question);
     setTopic(result.topic || "");
+    setTask(result.task || null);
     setTurns([]);
     setPaused(false);
     setSession((old) => old ? { ...old, status: "interview_in_progress" } : old);
@@ -297,7 +420,7 @@ function App() {
       if (!text) return;
       const requestId = createRequestId();
       setTurns((old) => [...old, { role: "candidate", content: text }]);
-      const result = await api<{ question?: string; topic?: string; done: boolean }>("/api/interview/answer", {
+      const result = await api<{ question?: string; topic?: string; done: boolean; task?: Task }>("/api/interview/answer", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Request-ID": requestId },
         body: JSON.stringify({ answer: text, request_id: requestId }),
@@ -305,18 +428,54 @@ function App() {
       setAnswer("");
       if (result.done) {
         setQuestion("");
+        setTask(null);
         setSession((old) => old ? { ...old, status: "ready_for_feedback" } : old);
       } else {
         setTurns((old) => [...old, { role: "interviewer", content: result.question || "" }]);
         setQuestion(result.question || "");
         setTopic(result.topic || "");
+        setTask(result.task || null);
       }
     });
   };
 
+  const runPublicTask = () => void run(async () => {
+    if (!task || task.type === "oral") return;
+    if (!practicalCanRun) throw new Error(isAnalysisTask ? "请完整填写判断、依据和下一步验证方案" : "请先填写可执行代码或 SQL");
+    const result = await api<{ status: string; passed: number; total: number; compile_error?: string; runtime_error?: string; output_truncated?: boolean }>(`/api/interview/tasks/${encodeURIComponent(task.id)}/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ request_id: createRequestId(), language: taskLanguage, ...practicalPayload() }),
+    });
+    setTaskResult(result);
+  });
+
+  const submitPracticalTask = () => void run(async () => {
+    if (!task || task.type === "oral") return;
+    if (!practicalReady) throw new Error(isAnalysisTask ? "请完整填写判断、依据和下一步验证方案" : "请先填写代码或 SQL");
+    const result = await api<{ question?: string; topic?: string; done: boolean; task?: Task; result: { status: string; passed: number; total: number; compile_error?: string; runtime_error?: string } }>(`/api/interview/tasks/${encodeURIComponent(task.id)}/submit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ request_id: createRequestId(), language: taskLanguage, ...practicalPayload() }),
+    });
+    setTaskResult(result.result);
+    setTurns((old) => [...old, { role: "candidate", content: `实操题提交：通过 ${result.result.passed}/${result.result.total}`, turn_kind: task.type, task_id: task.id }]);
+    if (result.done) {
+      setQuestion("");
+      setTask(null);
+      setSession((old) => old ? { ...old, status: "ready_for_feedback" } : old);
+    } else {
+      if (result.question) setTurns((old) => [...old, { role: "interviewer", content: result.question || "", turn_kind: result.task?.type, task_id: result.task?.id }]);
+      setQuestion(result.question || "");
+      setTopic(result.topic || "");
+      setTask(result.task || null);
+    }
+  });
+
   const finish = () => void run(async () => {
     await api("/api/interview/end", { method: "POST" });
     setQuestion("");
+    setTask(null);
     setSession((old) => old ? { ...old, status: "ready_for_feedback" } : old);
   });
 
@@ -332,6 +491,7 @@ function App() {
     setFeedback(null);
     setTurns([]);
     setQuestion("");
+    setTask(null);
     setShowNextStyle(false);
     await preparePlan(selection);
   });
@@ -393,18 +553,28 @@ function App() {
 
       {step === 1 && session.status === "ready_for_interview" && (
         <section className="card">
-          <div className="interview-head"><div><h2>面试已准备好</h2><p className="muted">已根据你的研究方向、简历和面试官风格准备本轮约 25 分钟的自适应面试。具体问题会在面试中逐个出现。</p></div><StyleBadge style={session.interviewer_style} /></div>
+          <div className="interview-head"><div><h2>面试已准备好</h2><p className="muted">已根据你的研究方向、简历和面试官风格准备本轮约 35 分钟的混合面试，包含口头问题与编程/代码理解实操题。具体问题会在面试中逐个出现。</p></div><StyleBadge style={session.interviewer_style} /></div>
           <button onClick={start} disabled={busy}>{busy ? "准备中…" : "开始面试"}</button>
         </section>
       )}
 
       {step === 1 && session.status === "interview_in_progress" && (
         <section className="card interview">
-          <div className="interview-head"><div><p className="eyebrow">{topic || "动态追问"}</p><h2>面试进行中</h2></div><div className="actions"><StyleBadge style={session.interviewer_style} /><button className="ghost" onClick={() => setPaused((old) => !old)}>{paused ? "继续面试" : "暂停"}</button><button className="ghost" onClick={finish} disabled={busy}>结束面试</button></div></div>
+          <div className="interview-head"><div><p className="eyebrow">{task && task.type !== "oral" ? `实操 · ${topic || task.title}` : (topic || "动态追问")}</p><h2>面试进行中</h2></div><div className="actions"><StyleBadge style={session.interviewer_style} /><button className="ghost" onClick={() => setPaused((old) => !old)}>{paused ? "继续面试" : "暂停"}</button><button className="ghost" onClick={finish} disabled={busy}>结束面试</button></div></div>
           <p className="muted">当前面试官：{session.interviewer_style?.name || "默认类型"}。可以直接录制口语回答；转写后先由你检查，提交前不会进入面试记录。</p>
-          <div className="question">{question}</div>
-          <div className="history">{turns.slice(-6).map((turn, index) => <div className={turn.role} key={`${turn.role}-${index}`}><b>{turn.role === "candidate" ? "你" : "面试官"}</b><span>{turn.content}</span></div>)}</div>
-          {paused ? <div className="notice">面试已暂停，当前问题和已记录回答会保留。</div> : <form onSubmit={submitAnswer} className="answer"><VoiceRecorder disabled={busy} onTranscribed={(text) => setAnswer((old) => old.trim() ? `${old.trim()}\n${text}` : text)} /><textarea value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="录音转写会出现在这里，也可以直接输入。输入“跳过”可跳到下一题。" rows={5} maxLength={12000} required /><div className="answer-actions"><button type="button" className="ghost" onClick={() => setAnswer("跳过")}>跳过本题</button><button disabled={busy || !answer.trim()}>{busy ? "处理中…" : "确认并提交回答"}</button></div></form>}
+          <div className="question">{task && task.type !== "oral" ? task.core_question : question}</div>
+          {task && task.type !== "oral" && task.constraints?.length ? <div className="task-constraints"><strong>约束与输入格式</strong><ul>{task.constraints.map((constraint) => <li key={constraint}>{constraint}</li>)}</ul></div> : null}
+          {task && task.type !== "oral" && task.materials && <div className="task-material"><strong>任务材料</strong>{Object.entries(task.materials).map(([key, value]) => <div key={key} className="material-item"><b>{key === "schema" ? "数据库结构" : key === "seed" ? "初始数据" : key === "logs" ? "日志" : key === "metrics" ? "指标" : key === "dataset" ? "数据" : key === "prompt" ? "说明" : key}</b>{typeof value === "string" ? <pre>{value}</pre> : <pre>{JSON.stringify(value, null, 2)}</pre>}</div>)}</div>}
+          {task && task.type !== "oral" && task.public_samples?.length ? <div className="samples"><strong>公开样例</strong>{task.public_samples.map((sample, index) => <pre key={index}>{sample.rows ? `预期行：${JSON.stringify(sample.rows)}` : `输入：${sample.input}\n输出：${sample.output}`}{sample.explanation ? `\n说明：${sample.explanation}` : ""}</pre>)}</div> : null}
+          <div className="history">{turns.slice(-6).map((turn, index) => <div className={turn.role} key={`${turn.role}-${index}`}><b>{turn.role === "candidate" ? "你" : "面试官"}</b><div className="history-content"><span>{turn.content}</span>{turn.submission?.source && <pre className="history-code">{turn.submission.source}</pre>}{turn.submission?.result && <small>测试摘要：{turn.submission.result.status || "未执行"} · 通过 {turn.submission.result.passed ?? 0}/{turn.submission.result.total ?? 0}</small>}</div></div>)}</div>
+          {paused ? <div className="notice">面试已暂停，当前问题和已记录回答会保留。</div> : task && task.type !== "oral" ? <div className="practical-editor">
+            <div className="task-toolbar"><span className="timer">剩余 {formatSeconds(taskSeconds)}</span><span className="muted">公开试跑最多 {10} 次；最终提交后本题锁定</span>{task.type !== "practical" && task.language_options?.length ? <label>语言<select value={taskLanguage} onChange={(event) => setTaskLanguage(event.target.value)} disabled={busy || task.locked}>{task.language_options.map((language) => <option key={language} value={language}>{language === "python" ? "Python 3.12" : language === "cpp" ? "C++20" : language}</option>)}</select></label> : null}</div>
+            {task.type === "code_review" && <p className="muted">先解释问题和最小反例；如果愿意，可在下方提交修正版。</p>}
+            {isAnalysisTask ? <div className="analysis-form"><label>结构化判断<textarea value={analysisJudgment} onChange={(event) => setAnalysisJudgment(event.target.value)} placeholder="例如：指标下降主要来自数据分布变化…" rows={3} maxLength={12000} disabled={busy || task.locked} /></label><label>依据<textarea value={analysisEvidence} onChange={(event) => setAnalysisEvidence(event.target.value)} placeholder="引用表格、指标或日志中的具体证据…" rows={4} maxLength={12000} disabled={busy || task.locked} /></label><label>下一步验证方案<textarea value={analysisNextValidation} onChange={(event) => setAnalysisNextValidation(event.target.value)} placeholder="说明一个最小、可执行的验证或排查步骤…" rows={3} maxLength={12000} disabled={busy || task.locked} /></label><textarea value={taskExplanation} onChange={(event) => setTaskExplanation(event.target.value)} placeholder="补充说明（可选）" rows={3} maxLength={12000} disabled={busy || task.locked} /></div> : <textarea className="code-editor" value={taskSource} onChange={(event) => setTaskSource(event.target.value)} placeholder={task.type === "code_review" ? "在这里提交可选修正版…" : task.practical_type === "sql" ? "在这里编写只读 SELECT / CTE…" : "在这里编写代码…"} rows={14} maxLength={65536} disabled={busy || task.locked} spellCheck={false} />}
+            {task.type === "code_review" && <textarea value={taskExplanation} onChange={(event) => setTaskExplanation(event.target.value)} placeholder="补充你的解释和最小反例（可选）" rows={4} maxLength={12000} disabled={busy || task.locked} />}
+            {taskResult && <div className={`task-result ${taskResult.status === "ok" ? "success" : "failure"}`}><strong>{isAnalysisTask ? "分析已记录" : taskResult.status === "ok" ? "公开测试通过" : "需要检查"}</strong>{!isAnalysisTask && <span>{taskResult.passed ?? 0}/{taskResult.total ?? 0} 个测试</span>}{taskResult.compile_error && <small>编译错误：{taskResult.compile_error}</small>}{taskResult.runtime_error && <small>运行结果：{taskResult.runtime_error}</small>}{taskResult.output_truncated && <small>输出超过限制，已截断。</small>}</div>}
+            <div className="answer-actions"><button type="button" className="ghost" onClick={runPublicTask} disabled={busy || task.locked || !practicalCanRun}>{busy ? "执行中…" : isAnalysisTask ? "保存分析草稿" : "试跑公开样例"}</button><button type="button" onClick={submitPracticalTask} disabled={busy || task.locked || !practicalReady}>{busy ? "提交中…" : "最终提交并进入下一题"}</button></div>
+          </div> : <form onSubmit={submitAnswer} className="answer"><VoiceRecorder disabled={busy} onTranscribed={(text) => setAnswer((old) => old.trim() ? `${old.trim()}\n${text}` : text)} /><textarea value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="录音转写会出现在这里，也可以直接输入。输入“跳过”可跳到下一题。" rows={5} maxLength={12000} required /><div className="answer-actions"><button type="button" className="ghost" onClick={() => setAnswer("跳过")}>跳过本题</button><button disabled={busy || !answer.trim()}>{busy ? "处理中…" : "确认并提交回答"}</button></div></form>}
         </section>
       )}
 

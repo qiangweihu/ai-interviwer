@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, Literal
@@ -84,6 +85,114 @@ class PlanRequest(BaseModel):
     interviewer_style: InterviewerStyleSelection | None = None
 
 
+TaskType = Literal["oral", "coding", "code_review", "practical"]
+PracticalType = Literal["sql", "experiment_analysis"]
+Language = Literal["python", "cpp", "sql", "text"]
+
+
+class PublicSample(BaseModel):
+    """A visible, data-only example for an executable task.
+
+    Tests are deliberately represented as input/output data.  The server owns
+    the harness and never executes a model-generated test script.
+    """
+
+    input: str = ""
+    output: str = ""
+    explanation: str = ""
+    rows: list[list[Any]] | None = None
+
+    @model_validator(mode="after")
+    def validate_size(self):
+        for value in (self.input, self.output, self.explanation):
+            if len(str(value).encode("utf-8")) > 16384:
+                raise ValueError("公开样例数据超过大小限制")
+        if self.rows is not None:
+            if len(self.rows) > 200 or any(len(row) > 50 for row in self.rows):
+                raise ValueError("公开样例行数超过大小限制")
+        return self
+
+
+class PlanTopic(BaseModel):
+    """A backwards-compatible oral topic or a structured practical task."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    title: str
+    objective: str
+    core_question: str
+    followups: list[str] = Field(default_factory=list, max_length=3)
+    expected_evidence: list[str] = Field(default_factory=list)
+    evaluation_dimensions: list[str] = Field(default_factory=list)
+    minutes: int = Field(default=2, ge=1, le=15)
+    constraints: list[str] = Field(default_factory=list, max_length=20)
+    task_id: str | None = Field(default=None, max_length=128)
+    type: TaskType = "oral"
+    practical_type: PracticalType | None = None
+    language_options: list[Language] = Field(default_factory=list, max_length=3)
+    starter_code: str = Field(default="", max_length=65536)
+    materials: dict[str, Any] = Field(default_factory=dict)
+    public_samples: list[PublicSample] = Field(default_factory=list, max_length=10)
+    # The following fields are private plan data.  They are persisted with the
+    # run but stripped by all public response builders.
+    hidden_tests: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
+    reference_solution: str = Field(default="", max_length=65536)
+    reference_language: Language | None = None
+    rubric: list[str] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def normalize_task(self):
+        if self.type == "oral":
+            self.practical_type = None
+            self.language_options = []
+            self.starter_code = ""
+            self.public_samples = []
+            self.hidden_tests = []
+            self.reference_solution = ""
+            self.reference_language = None
+            self.rubric = []
+        elif self.type == "coding":
+            self.practical_type = None
+            if not self.language_options:
+                self.language_options = ["python", "cpp"]
+            if any(language not in {"python", "cpp"} for language in self.language_options):
+                raise ValueError("编程题只能选择 Python 或 C++")
+        elif self.type == "code_review":
+            self.practical_type = None
+            if not self.language_options:
+                self.language_options = ["python", "cpp"]
+            if any(language not in {"python", "cpp"} for language in self.language_options):
+                raise ValueError("代码理解题只能选择 Python 或 C++")
+        elif self.type == "practical" and self.practical_type == "sql":
+            self.language_options = ["sql"]
+        elif self.type == "practical" and self.practical_type is None:
+            self.practical_type = "experiment_analysis"
+            self.language_options = ["text"]
+        elif self.type == "practical" and self.practical_type == "experiment_analysis":
+            self.language_options = ["text"]
+        if self.reference_language and self.reference_language not in self.language_options:
+            raise ValueError("参考解法语言必须属于该题的语言选项")
+        allowed_test_keys = {"input", "output", "rows"}
+        for test in self.hidden_tests:
+            if not isinstance(test, dict) or any(key not in allowed_test_keys for key in test):
+                raise ValueError("隐藏测试只能包含 input、output 或 rows 数据字段")
+            for key in ("input", "output"):
+                if key in test and len(str(test[key]).encode("utf-8")) > 16384:
+                    raise ValueError("测试数据超过大小限制")
+            if "rows" in test and (
+                not isinstance(test["rows"], list)
+                or len(test["rows"]) > 200
+                or any(not isinstance(row, list) or len(row) > 50 for row in test["rows"])
+            ):
+                raise ValueError("隐藏测试结果行数超过大小限制")
+        return self
+
+
+# Newer callers can use the more descriptive name without breaking existing
+# imports in tests and integrations.
+PlanItem = PlanTopic
+
+
 class SessionResponse(BaseModel):
     status: str
     profile_revision: int
@@ -95,16 +204,6 @@ class SessionResponse(BaseModel):
     interviewer_style: InterviewerStylePublic | None = None
 
 
-class PlanTopic(BaseModel):
-    title: str
-    objective: str
-    core_question: str
-    followups: list[str] = Field(default_factory=list, max_length=3)
-    expected_evidence: list[str] = Field(default_factory=list)
-    evaluation_dimensions: list[str] = Field(default_factory=list)
-    minutes: int = Field(default=2, ge=1, le=10)
-
-
 class ResearchBriefPayload(BaseModel):
     # The current MVP deliberately does not perform external retrieval.
     research_status: Literal["degraded"] = "degraded"
@@ -113,17 +212,18 @@ class ResearchBriefPayload(BaseModel):
 
 
 class PlanPayload(BaseModel):
-    duration_minutes: int = Field(default=25, ge=10, le=60)
-    main_question_count: int = Field(default=10, ge=8, le=12)
-    topics: list[PlanTopic] = Field(min_length=8, max_length=12)
+    plan_version: int = Field(default=2, ge=1, le=2)
+    duration_minutes: int = Field(default=35, ge=10, le=60)
+    main_question_count: int = Field(default=8, ge=7, le=10)
+    topics: list[PlanTopic] = Field(min_length=7, max_length=10)
 
     @model_validator(mode="before")
     @classmethod
     def pad_short_model_output(cls, value: Any):
         """Keep a nearly valid model response usable without inventing CV facts.
 
-        MiMo occasionally returns seven topics even though the contract asks
-        for 8–12. Add only generic coverage topics before normal validation;
+        MiMo occasionally returns fewer than eight topics even though the
+        normal mixed-plan target is 7–10. Add only generic coverage topics before normal validation;
         these contain no candidate-specific claims and let the interview
         continue while preserving the minimum plan contract.
         """
@@ -185,6 +285,19 @@ class PlanPayload(BaseModel):
             topic["title"] = title
             padded.append(topic)
             existing_titles.add(title)
+        while len(padded) < 7:
+            padded.append(
+                {
+                    "title": f"基础补充（{len(padded) + 1}）",
+                    "objective": "补充核验方向相关的核心概念。",
+                    "core_question": "请解释一个与你目标方向相关的核心概念，并说明它的适用边界。",
+                    "followups": [],
+                    "expected_evidence": ["定义、机制、边界"],
+                    "evaluation_dimensions": ["专业知识与基础"],
+                    "minutes": 2,
+                    "type": "oral",
+                }
+            )
         normalized = dict(value)
         normalized["topics"] = padded
         normalized["main_question_count"] = len(padded)
@@ -201,6 +314,7 @@ class StartResponse(BaseModel):
     question: str
     topic: str | None = None
     turn_sequence: int
+    task: dict[str, Any] | None = None
 
 
 class InterviewStateResponse(BaseModel):
@@ -208,7 +322,8 @@ class InterviewStateResponse(BaseModel):
     question: str | None = None
     topic: str | None = None
     turn_sequence: int | None = None
-    turns: list[dict[str, str | int]] = Field(default_factory=list)
+    turns: list[dict[str, Any]] = Field(default_factory=list)
+    task: dict[str, Any] | None = None
 
 
 class AnswerRequest(BaseModel):
@@ -230,6 +345,69 @@ class AnswerResponse(BaseModel):
     turn_sequence: int | None = None
     done: bool = False
     clarification: bool = False
+    task: dict[str, Any] | None = None
+
+
+class PracticalRunRequest(BaseModel):
+    request_id: str = Field(min_length=8, max_length=128)
+    language: Language
+    source: str = Field(default="", max_length=65536)
+    explanation: str = Field(default="", max_length=12000)
+    analysis: dict[str, str] | None = None
+
+    @field_validator("source")
+    @classmethod
+    def source_is_string(cls, value: str) -> str:
+        return value
+
+    @model_validator(mode="after")
+    def require_source_or_analysis(self):
+        if not self.source.strip() and not self.analysis and not self.explanation.strip():
+            raise ValueError("代码、SQL、解释或结构化分析不能为空")
+        if self.analysis:
+            allowed = {"judgment", "evidence", "next_validation"}
+            if set(self.analysis) - allowed:
+                raise ValueError("分析字段只能包含 judgment、evidence、next_validation")
+            if any(len(value.encode("utf-8")) > 12000 for value in self.analysis.values()):
+                raise ValueError("分析内容超过大小限制")
+        return self
+
+    def effective_source(self) -> str:
+        """Return the source payload used by the runner and evidence store."""
+
+        if self.source.strip():
+            return self.source
+        if self.analysis is not None:
+            return json.dumps(self.analysis, ensure_ascii=False, separators=(",", ":"))
+        # Explanation-only code-review submissions intentionally have no
+        # executable source. Keep the empty value so the service records
+        # ``not_executed`` instead of accidentally running the string "{}".
+        return ""
+
+
+class PracticalRunResponse(BaseModel):
+    status: Literal["ok", "failed", "unavailable", "not_executed"]
+    task_id: str
+    passed: int = 0
+    total: int = 0
+    compile_error: str | None = None
+    runtime_error: str | None = None
+    output_truncated: bool = False
+    execution_ms: int | None = None
+    public: bool = True
+
+
+class PracticalSubmitResponse(BaseModel):
+    status: str
+    task_id: str
+    locked: bool = True
+    result: PracticalRunResponse
+    question: str | None = None
+    topic: str | None = None
+    turn_sequence: int | None = None
+    done: bool = False
+    clarification: bool = False
+    task: dict[str, Any] | None = None
 
 
 class TranscriptionResponse(BaseModel):

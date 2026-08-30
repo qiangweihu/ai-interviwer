@@ -8,13 +8,75 @@ os.environ["DATA_DIR"] = _DATA_DIR.name
 
 from fastapi.testclient import TestClient
 
-from backend.app.db import InterviewRun, SessionLocal
+from backend.app.db import InterviewRun, PracticalSubmission, SessionLocal
 from backend.app.main import app
 from backend.app.schemas import FeedbackAssessmentPayload
 from backend.app.services import _feedback_probability
 
 
 class ServerWorkflowTests(unittest.TestCase):
+    def _start_until_practical(self, client):
+        client.post("/api/session")
+        client.post("/api/profile", data={"direction": "计算机视觉"}, files={"resume": ("cv.txt", b"Python")})
+        client.post("/api/plan")
+        current = client.post("/api/interview/start").json()
+        for index in range(20):
+            if current.get("task", {}).get("type") != "oral":
+                return current
+            current = client.post("/api/interview/answer", json={"answer": "回答", "request_id": f"practical-answer-{index:08d}"}).json()
+        self.fail("mixed plan did not reach a practical task")
+
+    def test_practical_task_public_run_hidden_submit_and_private_field_stripping(self):
+        with TestClient(app) as client:
+            current = self._start_until_practical(client)
+            task = current["task"]
+            self.assertIn(task["type"], {"coding", "code_review", "practical"})
+            self.assertNotIn("hidden_tests", task)
+            self.assertNotIn("reference_solution", task)
+            self.assertNotIn("reference_language", task)
+            self.assertNotIn("rubric", task)
+            source = "import sys\ndata=list(map(int,sys.stdin.read().split())); print(sum(data[1:]) if data else 0)"
+            trial = client.post(f"/api/interview/tasks/{task['id']}/run", json={"request_id": "trial-request-1234", "language": "python", "source": source})
+            self.assertEqual(trial.status_code, 200)
+            self.assertEqual(trial.json()["public"], True)
+            self.assertEqual(client.post(f"/api/interview/tasks/{task['id']}/run", json={"request_id": "trial-request-1234", "language": "python", "source": source}).json(), trial.json())
+            submitted = client.post(f"/api/interview/tasks/{task['id']}/submit", json={"request_id": "final-request-1234", "language": "python", "source": source, "explanation": "先处理输入边界。"})
+            self.assertEqual(submitted.status_code, 200)
+            self.assertTrue(submitted.json()["locked"])
+            if not submitted.json()["done"]:
+                self.assertNotEqual(submitted.json().get("task", {}).get("id"), task["id"])
+            retried = client.post(f"/api/interview/tasks/{task['id']}/submit", json={"request_id": "final-request-1234", "language": "python", "source": source, "explanation": "先处理输入边界。"})
+            self.assertEqual(retried.status_code, 200)
+            self.assertEqual(retried.json()["result"], submitted.json()["result"])
+            with SessionLocal() as db:
+                submissions = db.query(PracticalSubmission).all()
+                self.assertTrue(submissions)
+                self.assertTrue(submissions[-1].locked)
+
+    def test_code_review_can_submit_explanation_without_patch(self):
+        with TestClient(app) as client:
+            current = self._start_until_practical(client)
+            coding = current["task"]
+            source = "import sys\ndata=list(map(int,sys.stdin.read().split())); print(sum(data[1:]) if data else 0)"
+            next_item = client.post(
+                f"/api/interview/tasks/{coding['id']}/submit",
+                json={"request_id": "coding-final-explanation-test", "language": "python", "source": source},
+            ).json()
+            review = next_item.get("task")
+            self.assertEqual(review["type"], "code_review")
+            submitted = client.post(
+                f"/api/interview/tasks/{review['id']}/submit",
+                json={
+                    "request_id": "review-explanation-only-test",
+                    "language": "python",
+                    "source": "",
+                    "explanation": "空输入会触发除零；最小反例是空行。",
+                },
+            )
+            self.assertEqual(submitted.status_code, 200)
+            self.assertEqual(submitted.json()["result"]["status"], "not_executed")
+            self.assertEqual(submitted.json()["result"]["total"], 0)
+
     def test_feedback_probability_is_monotonic_and_sparse_evidence_is_shrunk(self):
         def assessment(score: int, confidence: str = "高"):
             return FeedbackAssessmentPayload.model_validate(

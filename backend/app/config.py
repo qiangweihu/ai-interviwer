@@ -27,6 +27,15 @@ class Settings:
     local_asr_language: str = os.getenv("LOCAL_ASR_LANGUAGE", "zh")
     max_audio_bytes: int = int(os.getenv("MAX_AUDIO_BYTES", str(15 * 1024 * 1024)))
     max_audio_seconds: int = int(os.getenv("MAX_AUDIO_SECONDS", "180"))
+    # Practical tasks fail closed in production until the private runner is
+    # explicitly enabled. Mock mode enables the deterministic test runner.
+    practical_runner_enabled: bool = os.getenv(
+        "PRACTICAL_RUNNER_ENABLED", "true" if os.getenv("MOCK_MIMO", "false").lower() in {"1", "true", "yes"} else "false"
+    ).lower() in {"1", "true", "yes"}
+    practical_runner_url: str = os.getenv("PRACTICAL_RUNNER_URL", "http://runner:8080")
+    practical_runner_token: str = os.getenv("PRACTICAL_RUNNER_TOKEN", "")
+    practical_max_runs_per_task: int = int(os.getenv("PRACTICAL_MAX_RUNS_PER_TASK", "10"))
+    practical_max_source_chars: int = int(os.getenv("PRACTICAL_MAX_SOURCE_CHARS", "65536"))
 
     @property
     def database_url(self) -> str:
