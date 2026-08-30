@@ -180,6 +180,43 @@ class PlanTopic(BaseModel):
         for field in ("followups", "expected_evidence", "evaluation_dimensions", "constraints", "language_options", "rubric"):
             if field in normalized:
                 normalized[field] = _coerce_string_list(normalized[field])
+
+        # Models sometimes place the broad task kind in ``practical_type``
+        # (for example ``practical_type: coding``). Accept the shorthand and
+        # move it to the canonical ``type``/``practical_type`` pair before
+        # Literal validation rejects an otherwise usable plan.
+        type_aliases = {
+            "code": "coding",
+            "programming": "coding",
+            "编程": "coding",
+            "debugging": "code_review",
+            "debug": "code_review",
+            "调试": "code_review",
+            "sqlite": "sql",
+            "实验分析": "experiment_analysis",
+            "experiment": "experiment_analysis",
+            "analysis": "experiment_analysis",
+        }
+        raw_type = normalized.get("type")
+        raw_practical_type = normalized.get("practical_type")
+        canonical_type = type_aliases.get(str(raw_type).strip().lower(), raw_type) if raw_type is not None else raw_type
+        canonical_practical_type = type_aliases.get(str(raw_practical_type).strip().lower(), raw_practical_type) if raw_practical_type is not None else raw_practical_type
+        if canonical_practical_type == "coding":
+            normalized["type"] = "coding"
+            normalized["practical_type"] = None
+        elif canonical_practical_type == "code_review":
+            normalized["type"] = "code_review"
+            normalized["practical_type"] = None
+        elif canonical_practical_type in {"sql", "experiment_analysis"}:
+            normalized["type"] = "practical"
+            normalized["practical_type"] = canonical_practical_type
+        else:
+            if canonical_type is not None:
+                normalized["type"] = canonical_type
+            else:
+                normalized.pop("type", None)
+            if canonical_practical_type is not None:
+                normalized["practical_type"] = canonical_practical_type
         return normalized
 
     @model_validator(mode="after")

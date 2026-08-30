@@ -67,6 +67,19 @@ class ServerScaffoldContractTests(unittest.TestCase):
         self.assertEqual(topic.constraints, ["只能使用只读查询"])
         self.assertEqual(topic.rubric, ["结果正确", "解释清晰"])
 
+    def test_model_task_type_shorthand_is_normalized(self):
+        topic = PlanTopic.model_validate(
+            {
+                "title": "编程题",
+                "objective": "验证实现能力",
+                "core_question": "请完成实现。",
+                "type": "practical",
+                "practical_type": "coding",
+            }
+        )
+        self.assertEqual(topic.type, "coding")
+        self.assertIsNone(topic.practical_type)
+
     def test_server_files_and_api_contract_are_present(self):
         for path in (
             "backend/app/main.py",
